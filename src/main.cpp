@@ -21,7 +21,7 @@ void setup()
 
     // ── E-Paper initialisation (kept in setup by request) ────────────────────
     displayBegin();
-    displayFillScreen(0xFFFF);
+    displayFillScreen(EINK_WHITE);
     displayUpdate();
     delay(1000);
 

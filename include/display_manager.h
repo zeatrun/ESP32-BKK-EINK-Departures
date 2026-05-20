@@ -3,6 +3,13 @@
 #include <Arduino.h>
 #include "departures.h"
 
+#define EINK_BLACK 0XF
+#define EINK_WHITE 0X0
+#define EINK_BLUE 0XD
+#define EINK_YELLOW 0XB
+#define EINK_GREEN 0X2
+#define EINK_RED 0X6
+
 // Basic display lifecycle
 void displayBegin();
 void displayFillScreen(uint16_t color);
