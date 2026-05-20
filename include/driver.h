@@ -1,0 +1,7 @@
+#ifndef BOARD_SCREEN_COMBO
+#define BOARD_SCREEN_COMBO 509 // 7.3 inch six-color ePaper Screen (ED2208)
+#endif
+
+#ifndef USE_XIAO_EPAPER_DISPLAY_BOARD_EE04
+#define USE_XIAO_EPAPER_DISPLAY_BOARD_EE04
+#endif
