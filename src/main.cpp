@@ -19,11 +19,9 @@ void setup()
     delay(2000);
     Serial.println("7.3\" Colorful E-Paper Bitmap Display Example");
 
-    // ── E-Paper initialisation (kept in setup by request) ────────────────────
+    // ── E-Paper initialisation  ──────────────────────────────────────────────
     displayBegin();
-    displayFillScreen(EINK_WHITE);
-    displayUpdate();
-    delay(1000);
+    displayTaskStart();
 
     // ── Synchronisation primitives ───────────────────────────────────────────
     departuresInit();          // creates g_departuresMutex
