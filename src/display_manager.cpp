@@ -136,6 +136,20 @@ void displayRenderFromGlobals()
     displayRenderDepartures(trainCopy, trainCount, busCopy, busCount);
 }
 
+void displayLineData(const Departure* departures, int count, int x, int y, uint16_t color)
+{
+    // Placeholder for future departure rendering logic.
+    (void)departures;
+    (void)count;
+    (void)x;
+    (void)y;
+    (void)color;
+    for (int i = 0; i < count; ++i)
+    {
+        g_epaper.fillRoundRect(x + 15, y + (i * 38) + 5, 50, 30, 5, color);
+    }
+}
+
 void displayEmptyBackground()
 {
     // Container rectangles
@@ -205,7 +219,7 @@ void displayEmptyBackground()
     g_epaper.drawLine(WEATHER_SECTION_X + 10, WAEATHER_SECTION_Y + 170, WEATHER_SECTION_X + 170, WAEATHER_SECTION_Y + 170, EINK_WHITE);
 
     // Create text
-    g_epaper.setTextSize(2);
+    g_epaper.setTextSize(1);
     g_epaper.setRotation(3);
     g_epaper.setTextColor(EINK_BLACK, EINK_WHITE, true);
     g_epaper.setTextFont(2);
@@ -235,21 +249,23 @@ void displayEmptyBackground()
 
     g_epaper.setRotation(3);
     g_epaper.setTextColor(EINK_WHITE, EINK_BLUE, true);
-    g_epaper.drawString("Pilisvorosvar:", TRAIN_SECTION_X + 360, TRAIN_SECTION_Y + 10);
+    g_epaper.drawString("Pilisvorosvar", TRAIN_SECTION_X + 380, TRAIN_SECTION_Y + 12);
 
     g_epaper.setRotation(3);
     g_epaper.setTextColor(EINK_BLACK, EINK_YELLOW, true);
-    g_epaper.drawString("Pilisszentivan - PEVDI", BUS_SECTION_X + 330, BUS_SECTION_Y + 10);
+    g_epaper.drawString("Pilisszentivan - PEVDI", BUS_SECTION_X + 330, BUS_SECTION_Y + 12);
 }
 
 void displayTask(void* /*pvParameters*/)
 {
     // One time setup
-    displayFillScreen(EINK_WHITE);
-    displayUpdate();
-    delay(1000);
-
     displayEmptyBackground();
+    displayUpdate();
+
+    // DEMO TEMPORARY
+    vTaskDelay(pdMS_TO_TICKS(5000));
+    displayLineData(nullptr, 5, BUS_SECTION_X, BUS_SECTION_Y + 43, EINK_YELLOW);
+    displayLineData(nullptr, 5, TRAIN_SECTION_X, TRAIN_SECTION_Y + 43, EINK_BLUE);
     displayUpdate();
 
     // Continously update if needed
@@ -261,7 +277,7 @@ void displayTask(void* /*pvParameters*/)
 
 void displayTaskStart()
 {
-        // Pin to Core 0; networking stack is thread-safe on ESP32
+        // Pin to Core 1; networking stack is thread-safe on ESP32
     xTaskCreatePinnedToCore(
         displayTask,
         "DisplayTask",
