@@ -21,6 +21,7 @@
 
 // Display RTOS
 void displayTaskStart();
+void displayNotifyDataChanged();
 
 // Basic display lifecycle
 void displayBegin();

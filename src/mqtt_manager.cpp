@@ -1,5 +1,6 @@
 #include "mqtt_manager.h"
 #include "departures.h"
+#include "display_manager.h"
 #include <ArduinoJson.h>
 
 // Matches the bit defined in wifi_manager.cpp
@@ -8,6 +9,34 @@
 static EventGroupHandle_t s_wifiEventGroup = nullptr;
 static SemaphoreHandle_t  s_clientMutex    = nullptr;
 static PubSubClient*      s_mqttClient     = nullptr;
+
+static bool departureEquals(const Departure& a, const Departure& b)
+{
+    return strncmp(a.line, b.line, sizeof(a.line)) == 0
+        && strncmp(a.routeIdText, b.routeIdText, sizeof(a.routeIdText)) == 0
+        && strncmp(a.destination, b.destination, sizeof(a.destination)) == 0
+        && strncmp(a.stopName, b.stopName, sizeof(a.stopName)) == 0
+        && a.minutes == b.minutes
+        && a.timestamp == b.timestamp;
+}
+
+static bool departuresEqual(const Departure* a, int aCount, const Departure* b, int bCount)
+{
+    if (aCount != bCount)
+    {
+        return false;
+    }
+
+    for (int i = 0; i < aCount; ++i)
+    {
+        if (!departureEquals(a[i], b[i]))
+        {
+            return false;
+        }
+    }
+
+    return true;
+}
 
 // ── Callback ────────────────────────────────────────────────────────────────
 
@@ -38,46 +67,78 @@ static void mqttCallback(char* topic, byte* payload, unsigned int length)
         return;
     }
 
+    Departure nextBusDepartures[MAX_DEPARTURES]   = {};
+    Departure nextTrainDepartures[MAX_DEPARTURES] = {};
+    int nextBusCount   = 0;
+    int nextTrainCount = 0;
+
+    for (JsonObject item : arr)
+    {
+        const char* line = item["line"] | "";
+        if (line[0] == '\0') continue;
+
+        // Buses have numeric line identifiers; trains use letter prefixes (Z, S, H, M…)
+        bool isBus = isdigit(static_cast<unsigned char>(line[0]));
+
+        Departure* dest = isBus ? nextBusDepartures   : nextTrainDepartures;
+        int&       cnt  = isBus ? nextBusCount        : nextTrainCount;
+
+        if (cnt >= MAX_DEPARTURES) continue;
+
+        strlcpy(dest[cnt].line,        line,                      sizeof(dest[cnt].line));
+        strlcpy(dest[cnt].routeIdText, item["routeIdText"] | "",  sizeof(dest[cnt].routeIdText));
+        strlcpy(dest[cnt].destination, item["destination"] | "",  sizeof(dest[cnt].destination));
+        strlcpy(dest[cnt].stopName,    item["stopName"]    | "",  sizeof(dest[cnt].stopName));
+        dest[cnt].minutes   = item["minutes"]   | 0;
+        dest[cnt].timestamp = item["timestamp"] | 0UL;
+
+        ++cnt;
+    }
+
+    bool changed = false;
+
     // ── Fill departure globals under mutex ───────────────────────────────────
     if (xSemaphoreTake(g_departuresMutex, pdMS_TO_TICKS(200)) == pdTRUE)
     {
-        g_busCount   = 0;
-        g_trainCount = 0;
+        const bool busesSame = departuresEqual(g_busDepartures, g_busCount,
+                                               nextBusDepartures, nextBusCount);
+        const bool trainsSame = departuresEqual(g_trainDepartures, g_trainCount,
+                                                nextTrainDepartures, nextTrainCount);
 
-        for (JsonObject item : arr)
+        changed = !(busesSame && trainsSame);
+
+        if (changed)
         {
-            const char* line = item["line"] | "";
-            if (line[0] == '\0') continue;
+            g_busCount   = nextBusCount;
+            g_trainCount = nextTrainCount;
 
-            // Buses have numeric line identifiers; trains use letter prefixes (Z, S, H, M…)
-            bool isBus = isdigit(static_cast<unsigned char>(line[0]));
+            for (int i = 0; i < g_busCount; ++i)   g_busDepartures[i]   = nextBusDepartures[i];
+            for (int i = g_busCount; i < MAX_DEPARTURES; ++i) g_busDepartures[i] = {};
 
-            Departure* dest = isBus ? g_busDepartures   : g_trainDepartures;
-            int&       cnt  = isBus ? g_busCount        : g_trainCount;
+            for (int i = 0; i < g_trainCount; ++i) g_trainDepartures[i] = nextTrainDepartures[i];
+            for (int i = g_trainCount; i < MAX_DEPARTURES; ++i) g_trainDepartures[i] = {};
 
-            if (cnt >= MAX_DEPARTURES) continue;
-
-            strlcpy(dest[cnt].line,        line,                      sizeof(dest[cnt].line));
-            strlcpy(dest[cnt].routeIdText, item["routeIdText"] | "",  sizeof(dest[cnt].routeIdText));
-            strlcpy(dest[cnt].destination, item["destination"] | "",  sizeof(dest[cnt].destination));
-            strlcpy(dest[cnt].stopName,    item["stopName"]    | "",  sizeof(dest[cnt].stopName));
-            dest[cnt].minutes   = item["minutes"]   | 0;
-            dest[cnt].timestamp = item["timestamp"] | 0UL;
-
-            ++cnt;
+            Serial.print("[MQTT] Departures updated: ");
+            Serial.print(g_busCount);
+            Serial.print(" bus(es), ");
+            Serial.print(g_trainCount);
+            Serial.println(" train(s).");
         }
-
-        Serial.print("[MQTT] Departures updated: ");
-        Serial.print(g_busCount);
-        Serial.print(" bus(es), ");
-        Serial.print(g_trainCount);
-        Serial.println(" train(s).");
+        else
+        {
+            Serial.println("[MQTT] No departure change; skipping display refresh.");
+        }
 
         xSemaphoreGive(g_departuresMutex);
     }
     else
     {
         Serial.println("[MQTT] Could not acquire departures mutex.");
+    }
+
+    if (changed)
+    {
+        displayNotifyDataChanged();
     }
 }
 

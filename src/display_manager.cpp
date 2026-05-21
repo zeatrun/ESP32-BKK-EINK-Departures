@@ -5,6 +5,79 @@
 
 static EPaper g_epaper;
 static SemaphoreHandle_t g_displayMutex = nullptr;
+static TaskHandle_t g_displayTaskHandle = nullptr;
+
+static void drawBoldText(const char* text, int x, int y)
+{
+    if (text == nullptr || text[0] == '\0')
+    {
+        return;
+    }
+
+    g_epaper.drawString(text, x, y);
+    g_epaper.drawString(text, x + 1, y);
+}
+
+static void drawClockIcon(int centerX, int centerY, uint16_t color)
+{
+    constexpr int radius = 6;
+
+    // Clock face
+    g_epaper.drawCircle(centerX, centerY, radius, color);
+    g_epaper.fillCircle(centerX, centerY, 1, color);
+
+    // Minute hand to 12 o'clock
+    g_epaper.drawLine(centerX, centerY, centerX, centerY - 4, color);
+
+    // Hour hand to ~4 o'clock
+    g_epaper.drawLine(centerX, centerY, centerX + 3, centerY + 2, color);
+}
+
+static void ellipsizeToWidth(const char* src, char* out, size_t outSize, int maxWidthPx)
+{
+    if (out == nullptr || outSize == 0)
+    {
+        return;
+    }
+
+    out[0] = '\0';
+    if (src == nullptr || src[0] == '\0' || maxWidthPx <= 0)
+    {
+        return;
+    }
+
+    strlcpy(out, src, outSize);
+    if (g_epaper.textWidth(out) <= maxWidthPx)
+    {
+        return;
+    }
+
+    const char* dots = "...";
+    const int dotsWidth = g_epaper.textWidth(dots);
+    if (dotsWidth > maxWidthPx)
+    {
+        out[0] = '\0';
+        return;
+    }
+
+    size_t len = strlen(out);
+    while (len > 0)
+    {
+        out[--len] = '\0';
+
+        char candidate[128] = {0};
+        strlcpy(candidate, out, sizeof(candidate));
+        strlcat(candidate, dots, sizeof(candidate));
+
+        if (g_epaper.textWidth(candidate) <= maxWidthPx)
+        {
+            strlcpy(out, candidate, outSize);
+            return;
+        }
+    }
+
+    strlcpy(out, dots, outSize);
+}
 
 static bool takeDisplayMutex(TickType_t timeoutTicks)
 {
@@ -138,15 +211,115 @@ void displayRenderFromGlobals()
 
 void displayLineData(const Departure* departures, int count, int x, int y, uint16_t color)
 {
-    // Placeholder for future departure rendering logic.
-    (void)departures;
-    (void)count;
-    (void)x;
-    (void)y;
-    (void)color;
+    constexpr int rectX      = 15;
+    constexpr int rectW      = 60;
+    constexpr int rectH      = 30;
+    constexpr int rectRadius = 5;
+    constexpr int rowStep    = 38;
+    constexpr int rectYOffset = 5;
+    constexpr int textLeftPadding = 8;
+    constexpr int textRightPadding = 10;
+    constexpr int rightPanelWidth = 470;
+    constexpr int iconRadius = 6;
+    constexpr int iconPaddingRight = 8;
+    constexpr int iconGapFromText = 8;
+    constexpr int groupInnerX = 9;
+    constexpr int groupInnerY = -3;
+    constexpr int groupInnerW = 462;
+    constexpr int groupInnerH = 196;
+
+    // Always clear the inner group area first to avoid ghost text/boxes from previous state.
+    g_epaper.fillRect(x + groupInnerX, y + groupInnerY, groupInnerW, groupInnerH, EINK_WHITE);
+
+    if (departures == nullptr || count <= 0)
+    {
+        g_epaper.setTextSize(2);
+        g_epaper.setRotation(3);
+        g_epaper.setTextColor(EINK_BLACK, EINK_WHITE, true);
+        g_epaper.setTextDatum(MC_DATUM);
+        g_epaper.drawString("NINCS KOZELI INDULAS",
+                            x + groupInnerX + (groupInnerW / 2),
+                            y + groupInnerY + (groupInnerH / 2));
+        g_epaper.setTextDatum(TL_DATUM);
+        return;
+        // TODO If no departures, display a sleeping train/bus image
+    }
+
     for (int i = 0; i < count; ++i)
     {
-        g_epaper.fillRoundRect(x + 15, y + (i * 38) + 5, 50, 30, 5, color);
+        const int boxX = x + rectX;
+        const int boxY = y + (i * rowStep) + rectYOffset;
+        const int textX = boxX + rectW + textLeftPadding;
+        const int iconCenterX = x + rightPanelWidth - iconPaddingRight - iconRadius;
+        const int iconCenterY = boxY + (rectH / 2);
+        const int textRightLimitX = iconCenterX - iconRadius - iconGapFromText;
+        const int textMaxWidth = textRightLimitX - textX;
+        const int topLineY = boxY + 1;
+        const int bottomLineY = boxY + (rectH / 2) + 1;
+
+        g_epaper.fillRoundRect(boxX, boxY, rectW, rectH, rectRadius, color);
+        g_epaper.fillRect(textX, boxY, (x + rightPanelWidth - textRightPadding) - textX, rectH, EINK_WHITE);
+        
+        g_epaper.setTextSize(2);
+        g_epaper.setRotation(3);
+
+        // Color pairs
+        switch (color)
+        {            
+            case EINK_BLUE:
+                g_epaper.setTextColor(EINK_WHITE, EINK_BLUE, true);
+                break;
+            case EINK_YELLOW:
+                g_epaper.setTextColor(EINK_BLACK, EINK_YELLOW, true);
+                break;
+            default:
+                g_epaper.setTextColor(EINK_BLACK, EINK_WHITE, true);
+                break;
+        }
+
+        // `line` can be shorter than the fixed char array; trim trailing spaces.
+        char lineText[9] = {0};
+        memcpy(lineText, departures[i].line, sizeof(departures[i].line));
+        lineText[8] = '\0';
+
+        int len = 0;
+        while (len < 8 && lineText[len] != '\0')
+        {
+            ++len;
+        }
+        while (len > 0 && lineText[len - 1] == ' ')
+        {
+            lineText[len - 1] = '\0';
+            --len;
+        }
+
+        if (len > 0)
+        {
+            g_epaper.setTextDatum(MC_DATUM);
+            g_epaper.drawString(lineText, boxX + (rectW / 2), boxY + (rectH / 2));
+            g_epaper.setTextDatum(TL_DATUM);
+        }
+
+        g_epaper.setTextSize(1);
+        g_epaper.setTextColor(EINK_BLACK, EINK_WHITE, true);
+        g_epaper.setTextDatum(TL_DATUM);
+
+        char destinationText[96] = {0};
+        char routeText[128] = {0};
+
+        ellipsizeToWidth(departures[i].destination, destinationText, sizeof(destinationText), textMaxWidth);
+        ellipsizeToWidth(departures[i].routeIdText, routeText, sizeof(routeText), textMaxWidth);
+
+        if (destinationText[0] != '\0')
+        {
+            drawBoldText(destinationText, textX, topLineY);
+        }
+        if (routeText[0] != '\0')
+        {
+            g_epaper.drawString(routeText, textX, bottomLineY);
+        }
+
+        drawClockIcon(iconCenterX, iconCenterY, EINK_BLACK);
     }
 }
 
@@ -259,19 +432,54 @@ void displayEmptyBackground()
 void displayTask(void* /*pvParameters*/)
 {
     // One time setup
-    displayEmptyBackground();
-    displayUpdate();
+    if (takeDisplayMutex(pdMS_TO_TICKS(500)))
+    {
+        displayEmptyBackground();
+        g_epaper.update();
+        xSemaphoreGive(g_displayMutex);
+    }
 
-    // DEMO TEMPORARY
-    vTaskDelay(pdMS_TO_TICKS(5000));
-    displayLineData(nullptr, 5, BUS_SECTION_X, BUS_SECTION_Y + 43, EINK_YELLOW);
-    displayLineData(nullptr, 5, TRAIN_SECTION_X, TRAIN_SECTION_Y + 43, EINK_BLUE);
-    displayUpdate();
-
-    // Continously update if needed
+    // Wait for "new changed MQTT data" notifications and refresh only then.
     for(;;)
     {
-        vTaskDelay(pdMS_TO_TICKS(100));
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+
+        Departure trainCopy[MAX_DEPARTURES] = {};
+        Departure busCopy[MAX_DEPARTURES]   = {};
+        int trainCount = 0;
+        int busCount   = 0;
+
+        if (xSemaphoreTake(g_departuresMutex, pdMS_TO_TICKS(200)) == pdTRUE)
+        {
+            trainCount = g_trainCount;
+            if (trainCount > MAX_DEPARTURES) trainCount = MAX_DEPARTURES;
+
+            busCount = g_busCount;
+            if (busCount > MAX_DEPARTURES) busCount = MAX_DEPARTURES;
+
+            for (int i = 0; i < trainCount; ++i) trainCopy[i] = g_trainDepartures[i];
+            for (int i = 0; i < busCount; ++i)   busCopy[i]   = g_busDepartures[i];
+
+            xSemaphoreGive(g_departuresMutex);
+        }
+
+        if (takeDisplayMutex(pdMS_TO_TICKS(500)))
+        {
+            displayLineData(busCopy, busCount, BUS_SECTION_X, BUS_SECTION_Y + 43, EINK_YELLOW);
+            displayLineData(trainCopy, trainCount, TRAIN_SECTION_X, TRAIN_SECTION_Y + 43, EINK_BLUE);
+            g_epaper.update();
+            xSemaphoreGive(g_displayMutex);
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(10000));
+    }
+}
+
+void displayNotifyDataChanged()
+{
+    if (g_displayTaskHandle != nullptr)
+    {
+        xTaskNotifyGive(g_displayTaskHandle);
     }
 }
 
@@ -284,7 +492,7 @@ void displayTaskStart()
         4096,
         nullptr,
         2,          // priority
-        nullptr,
+        &g_displayTaskHandle,
         1           // core 1
     );
 }
