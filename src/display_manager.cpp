@@ -592,6 +592,12 @@ void displayNotifyDataChanged()
     }
 }
 
+void displayNotifyMinuteChanged()
+{
+    // TODO: update the clock widget on the display with the current time.
+    // timeManagerGetTime() will provide HH:MM and YYYY.MM.DD when implemented.
+}
+
 void displayTaskStart()
 {
         // Pin to Core 1; networking stack is thread-safe on ESP32

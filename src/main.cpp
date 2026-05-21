@@ -4,6 +4,7 @@
 #include "mqtt_manager.h"
 #include "departures.h"
 #include "display_manager.h"
+#include "time_manager.h"
 
 // ── Shared networking resources ──────────────────────────────────────────────
 // espClient is shared between the WiFi and MQTT subsystems.
@@ -38,6 +39,10 @@ void setup()
     // ── MQTT manager ──────────────────────────────────────────────────────────
     mqttManagerInit(s_wifiEventGroup, espClient, s_clientMutex);
     mqttTaskStart();
+
+    // ── Time manager ──────────────────────────────────────────────────────────
+    timeManagerInit(s_wifiEventGroup);
+    timeManagerStart();
 }
 
 // ── loop ─────────────────────────────────────────────────────────────────────
