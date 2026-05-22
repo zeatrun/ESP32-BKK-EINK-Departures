@@ -286,20 +286,20 @@ static void drawWeatherMetricsRow(int cardX,
     g_epaper.setTextSize(1);
 
     const int topY = y;
-    const int bottomY = y + SPRITE_WEATHER_ICON_HEIGHT + 4;
+    const int bottomY = y + SPRITE_WEATHER_ICON_HEIGHT;
 
     const int precipTextWidth = g_epaper.textWidth(precipText);
     const int precipBlockWidth = SPRITE_WEATHER_ICON_WIDTH + 2 + precipTextWidth;
     const int precipStartX = cardX + ((cardW - precipBlockWidth) / 2);
 
     drawSprite(precipStartX,
-               topY,
+               topY + 2,
                SPRITE_UMBRELLA_8X8,
                SPRITE_WEATHER_ICON_WIDTH,
                SPRITE_WEATHER_ICON_HEIGHT,
                1,
                textColor);
-    g_epaper.drawString(precipText, precipStartX + SPRITE_WEATHER_ICON_WIDTH + 2, topY + 1);
+    g_epaper.drawString(precipText, precipStartX + SPRITE_WEATHER_ICON_WIDTH + 2, topY);
 
     const int halfW = cardW / 2;
     const int windTextWidth = g_epaper.textWidth(windText);
@@ -311,22 +311,22 @@ static void drawWeatherMetricsRow(int cardX,
     const int humidityStartX = cardX + halfW + ((halfW - humidityBlockWidth) / 2);
 
     drawSprite(windStartX,
-               bottomY,
+               bottomY + 7,
                SPRITE_WIND_8X8,
                SPRITE_WEATHER_ICON_WIDTH,
                SPRITE_WEATHER_ICON_HEIGHT,
                1,
                textColor);
-    g_epaper.drawString(windText, windStartX + SPRITE_WEATHER_ICON_WIDTH + 2, bottomY + 1);
+    g_epaper.drawString(windText, windStartX + SPRITE_WEATHER_ICON_WIDTH + 2, bottomY + 5);
 
     drawSprite(humidityStartX,
-               bottomY,
+               bottomY + 7,
                SPRITE_DROP_8X8,
                SPRITE_WEATHER_ICON_WIDTH,
                SPRITE_WEATHER_ICON_HEIGHT,
                1,
                textColor);
-    g_epaper.drawString(humidityText, humidityStartX + SPRITE_WEATHER_ICON_WIDTH + 2, bottomY + 1);
+    g_epaper.drawString(humidityText, humidityStartX + SPRITE_WEATHER_ICON_WIDTH + 2, bottomY + 5);
 }
 
 static void drawCenteredText(const char* text, int centerX, int y)
