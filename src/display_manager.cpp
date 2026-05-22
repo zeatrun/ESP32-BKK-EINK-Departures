@@ -235,21 +235,98 @@ static void drawArrowIconScaled(int x, int y, bool up, uint16_t color, int scale
     }
 }
 
-static void drawWeatherMetricIcons(int cardX,
-                                   int cardW,
-                                   int y,
-                                   uint16_t color)
+static void drawWeatherMetricsRow(int cardX,
+                                  int cardW,
+                                  int y,
+                                  uint16_t textColor,
+                                  uint16_t bgColor,
+                                  float windKmh,
+                                  int precipPercent,
+                                  int humidityPercent,
+                                  bool hasValues)
 {
-    constexpr int iconSize = 8;
-    constexpr int gap = 10;
-    const int totalWidth = (iconSize * 3) + (gap * 2);
-    const int startX = cardX + ((cardW - totalWidth) / 2);
+    const bool compact = cardW <= 100;
 
-    for (int i = 0; i < 3; ++i)
+    char windText[20] = {0};
+    char precipText[20] = {0};
+    char humidityText[20] = {0};
+
+    if (hasValues)
     {
-        const int iconX = startX + (i * (iconSize + gap));
-        g_epaper.drawRect(iconX, y, iconSize, iconSize, color);
+        if (compact)
+        {
+            snprintf(windText, sizeof(windText), "%.0fk", windKmh);
+            snprintf(precipText, sizeof(precipText), "%d%%", precipPercent);
+            snprintf(humidityText, sizeof(humidityText), "%d%%", humidityPercent);
+        }
+        else
+        {
+            snprintf(windText, sizeof(windText), "%.0f km/h", windKmh);
+            snprintf(precipText, sizeof(precipText), "%d %%", precipPercent);
+            snprintf(humidityText, sizeof(humidityText), "%d %%", humidityPercent);
+        }
     }
+    else
+    {
+        if (compact)
+        {
+            strlcpy(windText, "xxk", sizeof(windText));
+            strlcpy(precipText, "xx%", sizeof(precipText));
+            strlcpy(humidityText, "xx%", sizeof(humidityText));
+        }
+        else
+        {
+            strlcpy(windText, "xx km/h", sizeof(windText));
+            strlcpy(precipText, "xx %", sizeof(precipText));
+            strlcpy(humidityText, "xx %", sizeof(humidityText));
+        }
+    }
+
+    g_epaper.setTextColor(textColor, bgColor, true);
+    g_epaper.setTextSize(1);
+
+    const int topY = y;
+    const int bottomY = y + SPRITE_WEATHER_ICON_HEIGHT + 4;
+
+    const int precipTextWidth = g_epaper.textWidth(precipText);
+    const int precipBlockWidth = SPRITE_WEATHER_ICON_WIDTH + 2 + precipTextWidth;
+    const int precipStartX = cardX + ((cardW - precipBlockWidth) / 2);
+
+    drawSprite(precipStartX,
+               topY,
+               SPRITE_UMBRELLA_8X8,
+               SPRITE_WEATHER_ICON_WIDTH,
+               SPRITE_WEATHER_ICON_HEIGHT,
+               1,
+               textColor);
+    g_epaper.drawString(precipText, precipStartX + SPRITE_WEATHER_ICON_WIDTH + 2, topY + 1);
+
+    const int halfW = cardW / 2;
+    const int windTextWidth = g_epaper.textWidth(windText);
+    const int windBlockWidth = SPRITE_WEATHER_ICON_WIDTH + 2 + windTextWidth;
+    const int windStartX = cardX + ((halfW - windBlockWidth) / 2);
+
+    const int humidityTextWidth = g_epaper.textWidth(humidityText);
+    const int humidityBlockWidth = SPRITE_WEATHER_ICON_WIDTH + 2 + humidityTextWidth;
+    const int humidityStartX = cardX + halfW + ((halfW - humidityBlockWidth) / 2);
+
+    drawSprite(windStartX,
+               bottomY,
+               SPRITE_WIND_8X8,
+               SPRITE_WEATHER_ICON_WIDTH,
+               SPRITE_WEATHER_ICON_HEIGHT,
+               1,
+               textColor);
+    g_epaper.drawString(windText, windStartX + SPRITE_WEATHER_ICON_WIDTH + 2, bottomY + 1);
+
+    drawSprite(humidityStartX,
+               bottomY,
+               SPRITE_DROP_8X8,
+               SPRITE_WEATHER_ICON_WIDTH,
+               SPRITE_WEATHER_ICON_HEIGHT,
+               1,
+               textColor);
+    g_epaper.drawString(humidityText, humidityStartX + SPRITE_WEATHER_ICON_WIDTH + 2, bottomY + 1);
 }
 
 static void drawCenteredText(const char* text, int centerX, int y)
@@ -365,14 +442,21 @@ static void drawWeatherCards(const WeatherData* weather, bool hasWeather)
 
     float todayMin = 0.0F;
     float todayMax = 0.0F;
+    float todayWind = 0.0F;
+    int todayPrecipPercent = 0;
+    int todayHumidity = 0;
 
     bool hasToday = false;
     if (hasWeather && weather != nullptr)
     {
+        todayWind = weather->windSpeedKmh;
+        todayHumidity = weather->relativeHumidity;
+
         if (weather->dailyCount > 0)
         {
             todayMin = weather->daily[0].tempMinC;
             todayMax = weather->daily[0].tempMaxC;
+            todayPrecipPercent = weather->daily[0].precipProbMax;
             hasToday = true;
         }
     }
@@ -416,10 +500,19 @@ static void drawWeatherCards(const WeatherData* weather, bool hasWeather)
     g_epaper.drawString(todayMaxText, bigX + 128, auxTopY - 1);
     g_epaper.drawString(todayMinText, bigX + 128, auxBottomY + 9);
 
-    drawCenteredText(todayStatusText, bigX + (bigW / 2), dividerY + 15);
+    g_epaper.setTextSize(1);
+    drawCenteredText(todayStatusText, bigX + (bigW / 2), dividerY + 10);
 
     g_epaper.drawLine(bigX + 6, dividerY, bigX + bigW - 6, dividerY, EINK_WHITE);
-    drawWeatherMetricIcons(bigX, bigW, dividerY + 34, EINK_WHITE);
+    drawWeatherMetricsRow(bigX,
+                          bigW,
+                          dividerY + 22,
+                          EINK_WHITE,
+                          EINK_BLUE,
+                          todayWind,
+                          todayPrecipPercent,
+                          todayHumidity,
+                          hasWeather && hasToday);
 
     // Small white cards (Tomorrow + named weekdays)
     for (int i = 0; i < 3; ++i)
@@ -445,6 +538,9 @@ static void drawWeatherCards(const WeatherData* weather, bool hasWeather)
         float dayMin = 0.0F;
         float dayMax = 0.0F;
         float dayMain = 0.0F;
+        float dayWind = 0.0F;
+        int dayPrecipPercent = 0;
+        int dayHumidity = 0;
         bool dayAvailable = false;
 
         if (hasWeather && weather != nullptr && weather->dailyCount > (i + 1))
@@ -452,6 +548,9 @@ static void drawWeatherCards(const WeatherData* weather, bool hasWeather)
             dayMin = weather->daily[i + 1].tempMinC;
             dayMax = weather->daily[i + 1].tempMaxC;
             dayMain = (dayMin + dayMax) / 2.0F;
+            dayWind = weather->windSpeedKmh;
+            dayPrecipPercent = weather->daily[i + 1].precipProbMax;
+            dayHumidity = weather->relativeHumidity;
             dayAvailable = true;
         }
 
@@ -495,7 +594,15 @@ static void drawWeatherCards(const WeatherData* weather, bool hasWeather)
         drawCenteredText(dayStatusText, cardX + (smallW / 2), dividerY + 10);
 
         g_epaper.drawLine(cardX + 5, dividerY, cardX + smallW - 5, dividerY, EINK_BLACK);
-        drawWeatherMetricIcons(cardX, smallW, dividerY + 34, EINK_BLACK);
+        drawWeatherMetricsRow(cardX,
+                              smallW,
+                              dividerY + 22,
+                              EINK_BLACK,
+                              EINK_WHITE,
+                              dayWind,
+                              dayPrecipPercent,
+                              dayHumidity,
+                              dayAvailable);
     }
 }
 
