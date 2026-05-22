@@ -167,6 +167,30 @@ static void drawClockIcon(int centerX, int centerY, uint16_t color)
     g_epaper.drawLine(centerX, centerY, centerX + 3, centerY + 2, color);
 }
 
+static void formatDepartureTime(unsigned long unixTimestamp, char* out, size_t outSize)
+{
+    if (out == nullptr || outSize < 6)
+    {
+        return;
+    }
+
+    strlcpy(out, "xx:xx", outSize);
+
+    if (unixTimestamp == 0)
+    {
+        return;
+    }
+
+    const time_t departureTs = static_cast<time_t>(unixTimestamp);
+    struct tm departureTime = {};
+    if (localtime_r(&departureTs, &departureTime) == nullptr)
+    {
+        return;
+    }
+
+    snprintf(out, outSize, "%02d:%02d", departureTime.tm_hour, departureTime.tm_min);
+}
+
 static void ellipsizeToWidth(const char* src, char* out, size_t outSize, int maxWidthPx)
 {
     if (out == nullptr || outSize == 0)
@@ -461,9 +485,8 @@ void displayLineData(const Departure* departures, int count, int x, int y, uint1
             g_epaper.drawString(routeText, textX, bottomLineY);
         }
 
-        const int minutes = (departures[i].minutes < 0) ? 0 : departures[i].minutes;
-        char etaText[20] = {0};
-        snprintf(etaText, sizeof(etaText), "%d Perc", minutes);
+        char etaText[6] = {0};
+        formatDepartureTime(departures[i].timestamp, etaText, sizeof(etaText));
 
         g_epaper.setTextSize(2);
         g_epaper.setTextColor(EINK_BLACK, EINK_WHITE, true);

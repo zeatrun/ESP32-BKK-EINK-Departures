@@ -19,7 +19,7 @@ void setup()
 {
     Serial.begin(115200);
     delay(2000);
-    Serial.println("7.3\" Colorful E-Paper Bitmap Display Example");
+    Serial.println("7.3\" E-Paper Departures and Weather Display");
 
     // ── E-Paper initialisation  ──────────────────────────────────────────────
     displayBegin();
