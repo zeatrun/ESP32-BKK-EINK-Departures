@@ -23,6 +23,7 @@
 void displayTaskStart();
 void displayNotifyDataChanged();
 void displayNotifyMinuteChanged();
+void displayNotifyStatusChanged();
 
 // Basic display lifecycle
 void displayBegin();

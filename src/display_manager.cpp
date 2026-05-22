@@ -3,10 +3,15 @@
 
 #include "driver.h"
 #include "TFT_eSPI.h"
+#include "mqtt_manager.h"
+#include "time_manager.h"
 
 static EPaper g_epaper;
 static SemaphoreHandle_t g_displayMutex = nullptr;
 static TaskHandle_t g_displayTaskHandle = nullptr;
+
+constexpr uint32_t DISPLAY_NOTIFY_DATA   = (1UL << 0);
+constexpr uint32_t DISPLAY_NOTIFY_STATUS = (1UL << 1);
 
 static void drawSprite(int x,
                        int y,
@@ -69,6 +74,59 @@ static void drawSleepingIcon(int centerX, int centerY, const uint16_t* spriteRow
 }
 static Departure s_trainCopy[MAX_DEPARTURES] = {};
 static Departure s_busCopy[MAX_DEPARTURES]   = {};
+
+static void drawTopRightStatus()
+{
+    constexpr int topX = STATUS_SECTION_X + 355;
+    constexpr int topY = STATUS_SECTION_Y + 2;
+    constexpr int topClearWidth = 120;
+    constexpr int topClearHeight = 16;
+
+    constexpr int mqttTimeX = STATUS_SECTION_X + 425;
+    constexpr int mqttTimeY = STATUS_SECTION_Y + 20;
+    constexpr int mqttClearWidth = 80;
+    constexpr int mqttClearHeight = 16;
+
+    constexpr int dotRadius = 5;
+    constexpr int dotX = STATUS_SECTION_X + 472;
+    constexpr int dotY = STATUS_SECTION_Y + 28;
+
+    g_epaper.fillRect(topX, topY, topClearWidth, topClearHeight, EINK_WHITE);
+    g_epaper.fillRect(mqttTimeX, mqttTimeY, mqttClearWidth, mqttClearHeight, EINK_WHITE);
+
+    struct tm nowTime = {};
+    char nowStr[20] = "xx:xx | xxxx.xx.xx";
+
+    if (timeManagerGetTime(&nowTime))
+    {
+        snprintf(nowStr,
+                 sizeof(nowStr),
+                 "%02d:%02d | %04d.%02d.%02d",
+                 nowTime.tm_hour,
+                 nowTime.tm_min,
+                 nowTime.tm_year + 1900,
+                 nowTime.tm_mon + 1,
+                 nowTime.tm_mday);
+    }
+
+    struct tm updateTime = {};
+    char mqttTimeStr[6] = "xx:xx";
+
+    if (mqttManagerGetLastUpdateTime(&updateTime))
+    {
+        snprintf(mqttTimeStr, sizeof(mqttTimeStr), "%02d:%02d", updateTime.tm_hour, updateTime.tm_min);
+    }
+
+    g_epaper.setTextSize(1);
+    g_epaper.setRotation(3);
+    g_epaper.setTextColor(EINK_BLACK, EINK_WHITE, true);
+    g_epaper.drawString(nowStr, topX, topY);
+    g_epaper.drawString(mqttTimeStr, mqttTimeX, mqttTimeY);
+
+    const uint16_t dotColor = mqttManagerIsConnected() ? EINK_GREEN : EINK_RED;
+    g_epaper.fillCircle(dotX, dotY, dotRadius, dotColor);
+    g_epaper.drawCircle(dotX, dotY, dotRadius, EINK_BLACK);
+}
 
 static void drawBoldText(const char* text, int x, int y)
 {
@@ -526,7 +584,7 @@ void displayEmptyBackground()
     g_epaper.setTextSize(1);
     g_epaper.setRotation(3);
     g_epaper.setTextColor(EINK_BLACK, EINK_WHITE, true);
-    g_epaper.drawString("Frissitve:", STATUS_SECTION_X + 330, STATUS_SECTION_Y + 40);
+    g_epaper.drawString("Frissitve:", STATUS_SECTION_X + 355, STATUS_SECTION_Y + 20);
 
     g_epaper.setRotation(3);
     g_epaper.setTextColor(EINK_WHITE, EINK_BLUE, true);
@@ -535,6 +593,9 @@ void displayEmptyBackground()
     g_epaper.setRotation(3);
     g_epaper.setTextColor(EINK_BLACK, EINK_YELLOW, true);
     g_epaper.drawString("Pilisszentivan - PEVDI", BUS_SECTION_X + 330, BUS_SECTION_Y + 12);
+
+    // Top-right MQTT status: last refresh time and connection indicator.
+    drawTopRightStatus();
 }
 
 void displayTask(void* /*pvParameters*/)
@@ -547,15 +608,20 @@ void displayTask(void* /*pvParameters*/)
         xSemaphoreGive(g_displayMutex);
     }
 
-    // Wait for "new changed MQTT data" notifications and refresh only then.
+    // Wait for display notifications and refresh only when requested.
     for(;;)
     {
-        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+        uint32_t notifyValue = 0;
+        xTaskNotifyWait(0, UINT32_MAX, &notifyValue, portMAX_DELAY);
+
+        const bool refreshData = (notifyValue & DISPLAY_NOTIFY_DATA) != 0;
+        const bool refreshStatus = (notifyValue & DISPLAY_NOTIFY_STATUS) != 0;
+        const bool shouldUpdate = refreshData || refreshStatus;
 
         int trainCount = 0;
         int busCount   = 0;
 
-        if (xSemaphoreTake(g_departuresMutex, pdMS_TO_TICKS(200)) == pdTRUE)
+        if (refreshData && xSemaphoreTake(g_departuresMutex, pdMS_TO_TICKS(200)) == pdTRUE)
         {
             trainCount = g_trainCount;
             if (trainCount > MAX_DEPARTURES) trainCount = MAX_DEPARTURES;
@@ -572,15 +638,22 @@ void displayTask(void* /*pvParameters*/)
             xSemaphoreGive(g_departuresMutex);
         }
 
-        if (takeDisplayMutex(pdMS_TO_TICKS(500)))
+        if (shouldUpdate && takeDisplayMutex(pdMS_TO_TICKS(500)))
         {
-            displayLineData(s_busCopy, busCount, BUS_SECTION_X, BUS_SECTION_Y + 43, EINK_YELLOW);
-            displayLineData(s_trainCopy, trainCount, TRAIN_SECTION_X, TRAIN_SECTION_Y + 43, EINK_BLUE);
+            if (refreshData)
+            {
+                displayLineData(s_busCopy, busCount, BUS_SECTION_X, BUS_SECTION_Y + 43, EINK_YELLOW);
+                displayLineData(s_trainCopy, trainCount, TRAIN_SECTION_X, TRAIN_SECTION_Y + 43, EINK_BLUE);
+            }
+
+            if (refreshStatus)
+            {
+                drawTopRightStatus();
+            }
+
             g_epaper.update();
             xSemaphoreGive(g_displayMutex);
         }
-
-        vTaskDelay(pdMS_TO_TICKS(60000));
     }
 }
 
@@ -588,14 +661,24 @@ void displayNotifyDataChanged()
 {
     if (g_displayTaskHandle != nullptr)
     {
-        xTaskNotifyGive(g_displayTaskHandle);
+        xTaskNotify(g_displayTaskHandle, DISPLAY_NOTIFY_DATA, eSetBits);
     }
 }
 
 void displayNotifyMinuteChanged()
 {
-    // TODO: update the clock widget on the display with the current time.
-    // timeManagerGetTime() will provide HH:MM and YYYY.MM.DD when implemented.
+    if (g_displayTaskHandle != nullptr)
+    {
+        xTaskNotify(g_displayTaskHandle, DISPLAY_NOTIFY_STATUS, eSetBits);
+    }
+}
+
+void displayNotifyStatusChanged()
+{
+    if (g_displayTaskHandle != nullptr)
+    {
+        xTaskNotify(g_displayTaskHandle, DISPLAY_NOTIFY_STATUS, eSetBits);
+    }
 }
 
 void displayTaskStart()

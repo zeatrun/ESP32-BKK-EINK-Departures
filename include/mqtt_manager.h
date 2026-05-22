@@ -3,6 +3,7 @@
 #include <Arduino.h>
 #include <WiFi.h>
 #include <PubSubClient.h>
+#include <time.h>
 
 // Broker settings
 #define MQTT_SERVER   "192.168.0.138"
@@ -31,3 +32,16 @@ void mqttManagerInit(EventGroupHandle_t connectedEventGroup,
  * Spawn the MQTT management task on Core 0.
  */
 void mqttTaskStart();
+
+/**
+ * Returns true if MQTT client is currently connected to the broker.
+ */
+bool mqttManagerIsConnected();
+
+/**
+ * Returns the local time of the last successfully parsed MQTT payload.
+ *
+ * @param outTime  Destination tm struct.
+ * @return true if at least one valid MQTT payload was received.
+ */
+bool mqttManagerGetLastUpdateTime(struct tm* outTime);

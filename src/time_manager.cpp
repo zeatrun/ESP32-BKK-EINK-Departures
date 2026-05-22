@@ -60,7 +60,8 @@ static void timeTask(void* /*pvParameters*/)
     // configTime sets the SNTP server and starts the periodic sync.
     // After the first sync the ESP's internal timekeeping (RTC) continues
     // to count even without WiFi.
-    configTime(0, 0, NTP_SERVER);
+    // Timezone: CET (UTC+1) with DST (+1 hour in summer = UTC+2)
+    configTime(3600, 3600, NTP_SERVER);
 
     for (;;)
     {

@@ -9,6 +9,23 @@
 static EventGroupHandle_t s_wifiEventGroup = nullptr;
 static SemaphoreHandle_t  s_clientMutex    = nullptr;
 static PubSubClient*      s_mqttClient     = nullptr;
+static portMUX_TYPE       s_stateMux       = portMUX_INITIALIZER_UNLOCKED;
+static bool               s_mqttConnected  = false;
+static bool               s_hasLastUpdate  = false;
+static time_t             s_lastUpdateTs   = 0;
+
+static bool setMqttConnected(bool connected)
+{
+    bool changed = false;
+    taskENTER_CRITICAL(&s_stateMux);
+    if (s_mqttConnected != connected)
+    {
+        s_mqttConnected = connected;
+        changed = true;
+    }
+    taskEXIT_CRITICAL(&s_stateMux);
+    return changed;
+}
 
 static bool departureEquals(const Departure& a, const Departure& b)
 {
@@ -66,6 +83,11 @@ static void mqttCallback(char* topic, byte* payload, unsigned int length)
         Serial.println("[MQTT] Payload is not a JSON array, skipping.");
         return;
     }
+
+    taskENTER_CRITICAL(&s_stateMux);
+    s_lastUpdateTs  = time(nullptr);
+    s_hasLastUpdate = true;
+    taskEXIT_CRITICAL(&s_stateMux);
 
     Departure nextBusDepartures[MAX_DEPARTURES]   = {};
     Departure nextTrainDepartures[MAX_DEPARTURES] = {};
@@ -140,6 +162,9 @@ static void mqttCallback(char* topic, byte* payload, unsigned int length)
     {
         displayNotifyDataChanged();
     }
+
+    // Top-right status should reflect every valid MQTT refresh, not only data changes.
+    displayNotifyStatusChanged();
 }
 
 // ── Internal helpers ─────────────────────────────────────────────────────────
@@ -157,11 +182,13 @@ static bool mqttConnect()
     {
         Serial.println("connected.");
         s_mqttClient->subscribe(MQTT_SUB_TOPIC);
+        setMqttConnected(true);
         return true;
     }
 
     Serial.print("failed, rc=");
     Serial.println(s_mqttClient->state());
+    setMqttConnected(false);
     return false;
 }
 
@@ -171,13 +198,26 @@ static void mqttTask(void* /*pvParameters*/)
 {
     for (;;)
     {
-        // Block until WiFi is available
-        xEventGroupWaitBits(s_wifiEventGroup,
-                            WIFI_CONNECTED_BIT,
-                            pdFALSE,   // don't clear the bit
-                            pdTRUE,
-                            portMAX_DELAY);
+        const EventBits_t bits   = xEventGroupGetBits(s_wifiEventGroup);
+        const bool        wifiUp = (bits & WIFI_CONNECTED_BIT) != 0;
 
+        if (!wifiUp)
+        {
+            if (setMqttConnected(false))
+            {
+                displayNotifyStatusChanged();
+            }
+
+            // Block until WiFi is available
+            xEventGroupWaitBits(s_wifiEventGroup,
+                                WIFI_CONNECTED_BIT,
+                                pdFALSE,   // don't clear the bit
+                                pdTRUE,
+                                portMAX_DELAY);
+            continue;
+        }
+
+        // Block until WiFi is available
         // ── Reconnect if needed ──────────────────────────────────────────────
         if (xSemaphoreTake(s_clientMutex, pdMS_TO_TICKS(100)) == pdTRUE)
         {
@@ -186,9 +226,15 @@ static void mqttTask(void* /*pvParameters*/)
                 if (!mqttConnect())
                 {
                     xSemaphoreGive(s_clientMutex);
+                    if (setMqttConnected(false))
+                    {
+                        displayNotifyStatusChanged();
+                    }
                     vTaskDelay(pdMS_TO_TICKS(MQTT_RECONNECT_DELAY_MS));
                     continue;
                 }
+
+                displayNotifyStatusChanged();
             }
             xSemaphoreGive(s_clientMutex);
         }
@@ -197,11 +243,52 @@ static void mqttTask(void* /*pvParameters*/)
         if (xSemaphoreTake(s_clientMutex, pdMS_TO_TICKS(100)) == pdTRUE)
         {
             s_mqttClient->loop();
+
+            if (!s_mqttClient->connected())
+            {
+                if (setMqttConnected(false))
+                {
+                    displayNotifyStatusChanged();
+                }
+            }
+
             xSemaphoreGive(s_clientMutex);
         }
 
         vTaskDelay(pdMS_TO_TICKS(10));
     }
+}
+
+bool mqttManagerIsConnected()
+{
+    bool connected = false;
+    taskENTER_CRITICAL(&s_stateMux);
+    connected = s_mqttConnected;
+    taskEXIT_CRITICAL(&s_stateMux);
+    return connected;
+}
+
+bool mqttManagerGetLastUpdateTime(struct tm* outTime)
+{
+    if (outTime == nullptr)
+    {
+        return false;
+    }
+
+    time_t ts = 0;
+    bool hasUpdate = false;
+
+    taskENTER_CRITICAL(&s_stateMux);
+    hasUpdate = s_hasLastUpdate;
+    ts = s_lastUpdateTs;
+    taskEXIT_CRITICAL(&s_stateMux);
+
+    if (!hasUpdate)
+    {
+        return false;
+    }
+
+    return localtime_r(&ts, outTime) != nullptr;
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────
@@ -217,6 +304,7 @@ void mqttManagerInit(EventGroupHandle_t connectedEventGroup,
     static PubSubClient mqttClient(espClient);
     mqttClient.setServer(MQTT_SERVER, MQTT_PORT);
     mqttClient.setBufferSize(MQTT_BUFFER_SIZE);
+    mqttClient.setSocketTimeout(2);
     mqttClient.setCallback(mqttCallback);
     s_mqttClient = &mqttClient;
 }
