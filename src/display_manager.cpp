@@ -346,10 +346,10 @@ static void drawWeatherCards(const WeatherData* weather, bool hasWeather)
     g_epaper.drawString(todayMaxText, bigX + 116, iconReservedBottomY + 4);
     g_epaper.drawString(todayMinText, bigX + 116, iconReservedBottomY + 22);
 
-    drawCenteredText("demo_text", bigX + (bigW / 2), iconReservedBottomY + 34);
+    drawCenteredText("demo_text", bigX + (bigW / 2), dividerY + 10);
 
     g_epaper.drawLine(bigX + 6, dividerY, bigX + bigW - 6, dividerY, EINK_WHITE);
-    drawWeatherMetricIcons(bigX, bigW, dividerY + 24, EINK_WHITE);
+    drawWeatherMetricIcons(bigX, bigW, dividerY + 34, EINK_WHITE);
 
     // Small white cards (Tomorrow + named weekdays)
     for (int i = 0; i < 3; ++i)
@@ -413,10 +413,10 @@ static void drawWeatherCards(const WeatherData* weather, bool hasWeather)
         g_epaper.drawString(maxTempText, cardX + 60, iconReservedBottomY + 4);
         g_epaper.drawString(minTempText, cardX + 60, iconReservedBottomY + 22);
 
-        drawCenteredText("demo_text", cardX + (smallW / 2), iconReservedBottomY + 34);
+        drawCenteredText("demo_text", cardX + (smallW / 2), dividerY + 10);
 
         g_epaper.drawLine(cardX + 5, dividerY, cardX + smallW - 5, dividerY, EINK_BLACK);
-        drawWeatherMetricIcons(cardX, smallW, dividerY + 24, EINK_BLACK);
+        drawWeatherMetricIcons(cardX, smallW, dividerY + 34, EINK_BLACK);
     }
 }
 
