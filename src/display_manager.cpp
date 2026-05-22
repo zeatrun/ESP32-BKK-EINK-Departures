@@ -4,7 +4,6 @@
 #include "driver.h"
 #include "TFT_eSPI.h"
 #include "mqtt_manager.h"
-#include "time_manager.h"
 #include "weather.h"
 
 static EPaper g_epaper;
@@ -13,6 +12,7 @@ static TaskHandle_t g_displayTaskHandle = nullptr;
 
 constexpr uint32_t DISPLAY_NOTIFY_DATA   = (1UL << 0);
 constexpr uint32_t DISPLAY_NOTIFY_STATUS = (1UL << 1);
+constexpr uint32_t DISPLAY_DATA_REFRESH_INTERVAL_MS = 10UL * 60UL * 1000UL;
 
 static void drawSprite(int x,
                        int y,
@@ -97,21 +97,6 @@ static void drawTopRightStatus()
     g_epaper.fillRect(topX, topY, topClearWidth, topClearHeight, EINK_WHITE);
     g_epaper.fillRect(mqttTimeX, mqttTimeY, mqttClearWidth, mqttClearHeight, EINK_WHITE);
 
-    struct tm nowTime = {};
-    char nowStr[20] = "xx:xx | xxxx.xx.xx";
-
-    if (timeManagerGetTime(&nowTime))
-    {
-        snprintf(nowStr,
-                 sizeof(nowStr),
-                 "%02d:%02d | %04d.%02d.%02d",
-                 nowTime.tm_hour,
-                 nowTime.tm_min,
-                 nowTime.tm_year + 1900,
-                 nowTime.tm_mon + 1,
-                 nowTime.tm_mday);
-    }
-
     struct tm updateTime = {};
     char mqttTimeStr[6] = "xx:xx";
 
@@ -123,7 +108,6 @@ static void drawTopRightStatus()
     g_epaper.setTextSize(1);
     g_epaper.setRotation(3);
     g_epaper.setTextColor(EINK_BLACK, EINK_WHITE, true);
-    g_epaper.drawString(nowStr, topX, topY);
     g_epaper.drawString(mqttTimeStr, mqttTimeX, mqttTimeY);
 
     const uint16_t dotColor = mqttManagerIsConnected() ? EINK_GREEN : EINK_RED;
@@ -868,6 +852,10 @@ void displayEmptyBackground()
 
 void displayTask(void* /*pvParameters*/)
 {
+    TickType_t lastDataRefreshTick = 0;
+    bool hasSeenDepartureData = false;
+    bool hasSeenWeatherData = false;
+
     // One time setup
     if (takeDisplayMutex(pdMS_TO_TICKS(500)))
     {
@@ -883,8 +871,9 @@ void displayTask(void* /*pvParameters*/)
         xTaskNotifyWait(0, UINT32_MAX, &notifyValue, portMAX_DELAY);
 
         const bool refreshData = (notifyValue & DISPLAY_NOTIFY_DATA) != 0;
-        const bool refreshStatus = (notifyValue & DISPLAY_NOTIFY_STATUS) != 0;
-        const bool shouldUpdate = refreshData || refreshStatus;
+        bool shouldRenderData = false;
+        bool currentDepartureReady = false;
+        bool currentWeatherReady = false;
 
         int trainCount = 0;
         int busCount   = 0;
@@ -896,6 +885,8 @@ void displayTask(void* /*pvParameters*/)
 
             busCount = g_busCount;
             if (busCount > MAX_DEPARTURES) busCount = MAX_DEPARTURES;
+
+            currentDepartureReady = g_departuresValid;
 
             for (int i = 0; i < trainCount; ++i) s_trainCopy[i] = g_trainDepartures[i];
             for (int i = trainCount; i < MAX_DEPARTURES; ++i) s_trainCopy[i] = {};
@@ -909,6 +900,7 @@ void displayTask(void* /*pvParameters*/)
         if (refreshData && xSemaphoreTake(g_weatherMutex, pdMS_TO_TICKS(200)) == pdTRUE)
         {
             s_weatherValidCopy = g_weatherValid;
+            currentWeatherReady = g_weatherValid;
             if (s_weatherValidCopy)
             {
                 s_weatherCopy = g_weatherData;
@@ -920,17 +912,45 @@ void displayTask(void* /*pvParameters*/)
             xSemaphoreGive(g_weatherMutex);
         }
 
+        if (refreshData)
+        {
+            const TickType_t nowTick = xTaskGetTickCount();
+
+            const bool departureJustArrived = currentDepartureReady && !hasSeenDepartureData;
+            const bool weatherJustArrived = currentWeatherReady && !hasSeenWeatherData;
+            const bool initialArrival = departureJustArrived || weatherJustArrived;
+
+            if (departureJustArrived)
+            {
+                hasSeenDepartureData = true;
+            }
+            if (weatherJustArrived)
+            {
+                hasSeenWeatherData = true;
+            }
+
+            const TickType_t refreshIntervalTicks = pdMS_TO_TICKS(DISPLAY_DATA_REFRESH_INTERVAL_MS);
+            const bool intervalElapsed =
+                (lastDataRefreshTick == 0)
+                || ((nowTick - lastDataRefreshTick) >= refreshIntervalTicks);
+
+            shouldRenderData = initialArrival || intervalElapsed;
+
+            if (shouldRenderData)
+            {
+                lastDataRefreshTick = nowTick;
+            }
+        }
+
+        const bool shouldUpdate = shouldRenderData;
+
         if (shouldUpdate && takeDisplayMutex(pdMS_TO_TICKS(500)))
         {
-            if (refreshData)
+            if (shouldRenderData)
             {
                 drawWeatherCards(&s_weatherCopy, s_weatherValidCopy);
                 displayLineData(s_busCopy, busCount, BUS_SECTION_X, BUS_SECTION_Y + 43, EINK_YELLOW);
                 displayLineData(s_trainCopy, trainCount, TRAIN_SECTION_X, TRAIN_SECTION_Y + 43, EINK_BLUE);
-            }
-
-            if (refreshStatus)
-            {
                 drawTopRightStatus();
             }
 
@@ -950,18 +970,12 @@ void displayNotifyDataChanged()
 
 void displayNotifyMinuteChanged()
 {
-    if (g_displayTaskHandle != nullptr)
-    {
-        xTaskNotify(g_displayTaskHandle, DISPLAY_NOTIFY_STATUS, eSetBits);
-    }
+    // Minute ticks are intentionally ignored to avoid frequent display refresh.
 }
 
 void displayNotifyStatusChanged()
 {
-    if (g_displayTaskHandle != nullptr)
-    {
-        xTaskNotify(g_displayTaskHandle, DISPLAY_NOTIFY_STATUS, eSetBits);
-    }
+    // Status-only refresh is disabled; status updates are shown on 10-minute data refreshes.
 }
 
 void displayTaskStart()

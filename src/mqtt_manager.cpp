@@ -14,6 +14,8 @@ static portMUX_TYPE       s_stateMux       = portMUX_INITIALIZER_UNLOCKED;
 static bool               s_mqttConnected  = false;
 static bool               s_hasLastUpdate  = false;
 static time_t             s_lastUpdateTs   = 0;
+static bool               s_seenDeparturePayload = false;
+static bool               s_seenWeatherPayload   = false;
 
 static bool setMqttConnected(bool connected)
 {
@@ -123,6 +125,7 @@ static void mqttCallback(char* topic, byte* payload, unsigned int length)
 
     bool payloadAccepted = false;
     bool changed = false;
+    bool initialDataArrival = false;
 
     if (strcmp(topic, MQTT_SUB_TOPIC) == 0)
     {
@@ -171,6 +174,8 @@ static void mqttCallback(char* topic, byte* payload, unsigned int length)
                                                     nextTrainDepartures, nextTrainCount);
 
             changed = !(busesSame && trainsSame);
+
+            g_departuresValid = true;
 
             if (changed)
             {
@@ -286,16 +291,26 @@ static void mqttCallback(char* topic, byte* payload, unsigned int length)
 
     if (payloadAccepted)
     {
+        if (strcmp(topic, MQTT_SUB_TOPIC) == 0 && !s_seenDeparturePayload)
+        {
+            s_seenDeparturePayload = true;
+            initialDataArrival = true;
+        }
+        else if (strcmp(topic, MQTT_WEATHER_TOPIC) == 0 && !s_seenWeatherPayload)
+        {
+            s_seenWeatherPayload = true;
+            initialDataArrival = true;
+        }
+
         taskENTER_CRITICAL(&s_stateMux);
         s_lastUpdateTs  = time(nullptr);
         s_hasLastUpdate = true;
         taskEXIT_CRITICAL(&s_stateMux);
 
-        // Top-right status should reflect every valid MQTT refresh.
-        displayNotifyStatusChanged();
+        // Status refresh is handled together with the data refresh policy.
     }
 
-    if (changed)
+    if (changed || initialDataArrival)
     {
         displayNotifyDataChanged();
     }
@@ -338,10 +353,7 @@ static void mqttTask(void* /*pvParameters*/)
 
         if (!wifiUp)
         {
-            if (setMqttConnected(false))
-            {
-                displayNotifyStatusChanged();
-            }
+            setMqttConnected(false);
 
             // Block until WiFi is available
             xEventGroupWaitBits(s_wifiEventGroup,
@@ -361,15 +373,10 @@ static void mqttTask(void* /*pvParameters*/)
                 if (!mqttConnect())
                 {
                     xSemaphoreGive(s_clientMutex);
-                    if (setMqttConnected(false))
-                    {
-                        displayNotifyStatusChanged();
-                    }
+                    setMqttConnected(false);
                     vTaskDelay(pdMS_TO_TICKS(MQTT_RECONNECT_DELAY_MS));
                     continue;
                 }
-
-                displayNotifyStatusChanged();
             }
             xSemaphoreGive(s_clientMutex);
         }
@@ -381,10 +388,7 @@ static void mqttTask(void* /*pvParameters*/)
 
             if (!s_mqttClient->connected())
             {
-                if (setMqttConnected(false))
-                {
-                    displayNotifyStatusChanged();
-                }
+                setMqttConnected(false);
             }
 
             xSemaphoreGive(s_clientMutex);

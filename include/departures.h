@@ -36,6 +36,7 @@ extern int       g_busCount;
 
 extern Departure g_trainDepartures[MAX_DEPARTURES];
 extern int       g_trainCount;
+extern bool      g_departuresValid;
 
 /**
  * Create the mutex.  Must be called once before any task starts.
