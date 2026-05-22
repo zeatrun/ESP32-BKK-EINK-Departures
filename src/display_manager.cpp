@@ -86,13 +86,13 @@ static void drawTopRightStatus()
     constexpr int topClearHeight = 16;
 
     constexpr int mqttTimeX = STATUS_SECTION_X + 425;
-    constexpr int mqttTimeY = STATUS_SECTION_Y + 20;
+    constexpr int mqttTimeY = STATUS_SECTION_Y + 30;
     constexpr int mqttClearWidth = 80;
     constexpr int mqttClearHeight = 16;
 
     constexpr int dotRadius = 5;
     constexpr int dotX = STATUS_SECTION_X + 472;
-    constexpr int dotY = STATUS_SECTION_Y + 28;
+    constexpr int dotY = STATUS_SECTION_Y + 38;
 
     g_epaper.fillRect(topX, topY, topClearWidth, topClearHeight, EINK_WHITE);
     g_epaper.fillRect(mqttTimeX, mqttTimeY, mqttClearWidth, mqttClearHeight, EINK_WHITE);
@@ -336,15 +336,19 @@ static void drawWeatherCards(const WeatherData* weather, bool hasWeather)
     g_epaper.setTextColor(EINK_WHITE, EINK_BLUE, true);
     g_epaper.drawString("MA", bigX + 10, bigY + 8);
 
-    g_epaper.setTextSize(3);
-    g_epaper.drawString(todayMainText, bigX + 10, iconReservedBottomY + 2);
+    constexpr int mainTempY = iconReservedBottomY + 2;
+    constexpr int auxTopY = iconReservedBottomY + 7;
+    constexpr int auxBottomY = iconReservedBottomY + 19;
 
-    drawArrowIcon(bigX + 106, iconReservedBottomY + 6, true, EINK_WHITE);
-    drawArrowIcon(bigX + 106, iconReservedBottomY + 24, false, EINK_WHITE);
+    g_epaper.setTextSize(3);
+    g_epaper.drawString(todayMainText, bigX + 10, mainTempY);
+
+    drawArrowIcon(bigX + 120, auxTopY, true, EINK_WHITE);
+    drawArrowIcon(bigX + 120, auxBottomY, false, EINK_WHITE);
 
     g_epaper.setTextSize(1);
-    g_epaper.drawString(todayMaxText, bigX + 116, iconReservedBottomY + 4);
-    g_epaper.drawString(todayMinText, bigX + 116, iconReservedBottomY + 22);
+    g_epaper.drawString(todayMaxText, bigX + 130, auxTopY);
+    g_epaper.drawString(todayMinText, bigX + 130, auxBottomY);
 
     drawCenteredText("demo_text", bigX + (bigW / 2), dividerY + 10);
 
@@ -403,15 +407,19 @@ static void drawWeatherCards(const WeatherData* weather, bool hasWeather)
         g_epaper.setTextSize(1);
         g_epaper.drawString(label, cardX + 6, smallY + 8);
 
-        g_epaper.setTextSize(3);
-        g_epaper.drawString(mainTempText, cardX + 6, iconReservedBottomY + 2);
+        constexpr int smallMainTempY = iconReservedBottomY + 2;
+        constexpr int smallAuxTopY = iconReservedBottomY + 8;
+        constexpr int smallAuxBottomY = iconReservedBottomY + 28;
 
-        drawArrowIcon(cardX + 52, iconReservedBottomY + 6, true, EINK_BLACK);
-        drawArrowIcon(cardX + 52, iconReservedBottomY + 24, false, EINK_BLACK);
+        g_epaper.setTextSize(3);
+        g_epaper.drawString(mainTempText, cardX + 6, smallMainTempY);
+
+        drawArrowIcon(cardX + 58, smallAuxTopY, true, EINK_BLACK);
+        drawArrowIcon(cardX + 58, smallAuxBottomY + 6, false, EINK_BLACK);
 
         g_epaper.setTextSize(1);
-        g_epaper.drawString(maxTempText, cardX + 60, iconReservedBottomY + 4);
-        g_epaper.drawString(minTempText, cardX + 60, iconReservedBottomY + 22);
+        g_epaper.drawString(maxTempText, cardX + 68, smallAuxTopY);
+        g_epaper.drawString(minTempText, cardX + 68, smallAuxBottomY);
 
         drawCenteredText("demo_text", cardX + (smallW / 2), dividerY + 10);
 
@@ -836,7 +844,7 @@ void displayEmptyBackground()
     g_epaper.setTextSize(1);
     g_epaper.setRotation(3);
     g_epaper.setTextColor(EINK_BLACK, EINK_WHITE, true);
-    g_epaper.drawString("Frissitve:", STATUS_SECTION_X + 355, STATUS_SECTION_Y + 20);
+    g_epaper.drawString("Frissitve:", STATUS_SECTION_X + 355, STATUS_SECTION_Y + 30);
 
     g_epaper.setRotation(3);
     g_epaper.setTextColor(EINK_WHITE, EINK_BLUE, true);
