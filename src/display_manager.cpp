@@ -210,6 +210,31 @@ static void drawArrowIcon(int x, int y, bool up, uint16_t color)
     }
 }
 
+static void drawArrowIconScaled(int x, int y, bool up, uint16_t color, int scale)
+{
+    if (scale <= 1)
+    {
+        drawArrowIcon(x, y, up, color);
+        return;
+    }
+
+    auto sx = [x, scale](int v) { return x + (v * scale); };
+    auto sy = [y, scale](int v) { return y + (v * scale); };
+
+    if (up)
+    {
+        g_epaper.drawLine(sx(3), sy(7), sx(3), sy(1), color);
+        g_epaper.drawLine(sx(3), sy(1), sx(1), sy(3), color);
+        g_epaper.drawLine(sx(3), sy(1), sx(5), sy(3), color);
+    }
+    else
+    {
+        g_epaper.drawLine(sx(3), sy(1), sx(3), sy(7), color);
+        g_epaper.drawLine(sx(3), sy(7), sx(1), sy(5), color);
+        g_epaper.drawLine(sx(3), sy(7), sx(5), sy(5), color);
+    }
+}
+
 static void drawWeatherMetricIcons(int cardX,
                                    int cardW,
                                    int y,
@@ -280,6 +305,42 @@ static void getHungarianWeekdayLabel(const char* isoDate, char* out, size_t outS
     }
 }
 
+static const char* weatherCodeToHungarianText(int code)
+{
+    switch (code)
+    {
+        case 0: return "Napos";
+        case 1: return "T. napos";
+        case 2: return "V. felhos";
+        case 3: return "Borult";
+        case 45:
+        case 48: return "Kodos";
+        case 51:
+        case 53:
+        case 55: return "Szitallas";
+        case 56:
+        case 57: return "Fagyos szit.";
+        case 61:
+        case 63:
+        case 65: return "Eso";
+        case 66:
+        case 67: return "Onos eso";
+        case 71:
+        case 73:
+        case 75:
+        case 77: return "Ho";
+        case 80:
+        case 81:
+        case 82: return "Zapor";
+        case 85:
+        case 86: return "Hozapor";
+        case 95: return "Zivatar";
+        case 96:
+        case 99: return "Jeges zivatar";
+        default: return "Ismeretlen";
+    }
+}
+
 static void drawWeatherCards(const WeatherData* weather, bool hasWeather)
 {
     constexpr int bigX = WEATHER_SECTION_X + 5;
@@ -319,6 +380,7 @@ static void drawWeatherCards(const WeatherData* weather, bool hasWeather)
     char todayMainText[12] = {0};
     char todayMaxText[12] = {0};
     char todayMinText[12] = {0};
+    char todayStatusText[28] = "Nincs adat";
 
     formatTempWithDegree(0.0F, false, todayMainText, sizeof(todayMainText));
     formatTempWithDegree(0.0F, false, todayMaxText, sizeof(todayMaxText));
@@ -329,28 +391,32 @@ static void drawWeatherCards(const WeatherData* weather, bool hasWeather)
         formatTempWithDegree(weather->temperatureC, true, todayMainText, sizeof(todayMainText));
         formatTempWithDegree(todayMax, true, todayMaxText, sizeof(todayMaxText));
         formatTempWithDegree(todayMin, true, todayMinText, sizeof(todayMinText));
+        strlcpy(todayStatusText,
+                weatherCodeToHungarianText(weather->weatherCode),
+                sizeof(todayStatusText));
     }
 
     // Big blue card (Today / Ma)
+    g_epaper.setTextSize(2);
     g_epaper.fillRect(bigX + 1, bigY + 1, bigW - 2, bigH - 2, EINK_BLUE);
     g_epaper.setTextColor(EINK_WHITE, EINK_BLUE, true);
     g_epaper.drawString("MA", bigX + 10, bigY + 8);
 
     constexpr int mainTempY = iconReservedBottomY + 2;
     constexpr int auxTopY = iconReservedBottomY + 7;
-    constexpr int auxBottomY = iconReservedBottomY + 19;
+    constexpr int auxBottomY = iconReservedBottomY + 22;
 
-    g_epaper.setTextSize(3);
+    g_epaper.setTextSize(4);
     g_epaper.drawString(todayMainText, bigX + 10, mainTempY);
 
-    drawArrowIcon(bigX + 120, auxTopY, true, EINK_WHITE);
-    drawArrowIcon(bigX + 120, auxBottomY, false, EINK_WHITE);
+    drawArrowIconScaled(bigX + 112, auxTopY + 1, true, EINK_WHITE, 2);
+    drawArrowIconScaled(bigX + 112, auxBottomY + 20, false, EINK_WHITE, 2);
 
-    g_epaper.setTextSize(1);
-    g_epaper.drawString(todayMaxText, bigX + 130, auxTopY);
-    g_epaper.drawString(todayMinText, bigX + 130, auxBottomY);
+    g_epaper.setTextSize(2);
+    g_epaper.drawString(todayMaxText, bigX + 128, auxTopY - 1);
+    g_epaper.drawString(todayMinText, bigX + 128, auxBottomY + 9);
 
-    drawCenteredText("demo_text", bigX + (bigW / 2), dividerY + 10);
+    drawCenteredText(todayStatusText, bigX + (bigW / 2), dividerY + 15);
 
     g_epaper.drawLine(bigX + 6, dividerY, bigX + bigW - 6, dividerY, EINK_WHITE);
     drawWeatherMetricIcons(bigX, bigW, dividerY + 34, EINK_WHITE);
@@ -359,7 +425,8 @@ static void drawWeatherCards(const WeatherData* weather, bool hasWeather)
     for (int i = 0; i < 3; ++i)
     {
         const int cardX = smallXs[i];
-        g_epaper.fillRect(cardX + 1, smallY + 1, smallW - 2, smallH - 2, EINK_WHITE);
+        g_epaper.fillRoundRect(cardX, smallY, smallW, smallH, 8, EINK_WHITE);
+        g_epaper.drawRoundRect(cardX, smallY, smallW, smallH, 8, EINK_BLACK);
 
         char label[20] = {0};
         if (i == 0)
@@ -391,6 +458,7 @@ static void drawWeatherCards(const WeatherData* weather, bool hasWeather)
         char mainTempText[12] = {0};
         char maxTempText[12] = {0};
         char minTempText[12] = {0};
+        char dayStatusText[28] = "Nincs adat";
 
         formatTempWithDegree(0.0F, false, mainTempText, sizeof(mainTempText));
         formatTempWithDegree(0.0F, false, maxTempText, sizeof(maxTempText));
@@ -401,11 +469,14 @@ static void drawWeatherCards(const WeatherData* weather, bool hasWeather)
             formatTempWithDegree(dayMain, true, mainTempText, sizeof(mainTempText));
             formatTempWithDegree(dayMax, true, maxTempText, sizeof(maxTempText));
             formatTempWithDegree(dayMin, true, minTempText, sizeof(minTempText));
+            strlcpy(dayStatusText,
+                    weatherCodeToHungarianText(weather->daily[i + 1].weatherCode),
+                    sizeof(dayStatusText));
         }
 
         g_epaper.setTextColor(EINK_BLACK, EINK_WHITE, true);
         g_epaper.setTextSize(1);
-        g_epaper.drawString(label, cardX + 6, smallY + 8);
+        drawCenteredText(label, cardX + (smallW / 2), smallY + 12);
 
         constexpr int smallMainTempY = iconReservedBottomY + 2;
         constexpr int smallAuxTopY = iconReservedBottomY + 8;
@@ -421,7 +492,7 @@ static void drawWeatherCards(const WeatherData* weather, bool hasWeather)
         g_epaper.drawString(maxTempText, cardX + 68, smallAuxTopY);
         g_epaper.drawString(minTempText, cardX + 68, smallAuxBottomY);
 
-        drawCenteredText("demo_text", cardX + (smallW / 2), dividerY + 10);
+        drawCenteredText(dayStatusText, cardX + (smallW / 2), dividerY + 10);
 
         g_epaper.drawLine(cardX + 5, dividerY, cardX + smallW - 5, dividerY, EINK_BLACK);
         drawWeatherMetricIcons(cardX, smallW, dividerY + 34, EINK_BLACK);
