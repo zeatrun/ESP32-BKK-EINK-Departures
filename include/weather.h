@@ -3,7 +3,7 @@
 #include <Arduino.h>
 #include <freertos/semphr.h>
 
-#define MAX_WEATHER_DAYS 3
+#define MAX_WEATHER_DAYS 4
 
 struct WeatherDay
 {

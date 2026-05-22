@@ -5,6 +5,7 @@
 #include "TFT_eSPI.h"
 #include "mqtt_manager.h"
 #include "time_manager.h"
+#include "weather.h"
 
 static EPaper g_epaper;
 static SemaphoreHandle_t g_displayMutex = nullptr;
@@ -74,6 +75,8 @@ static void drawSleepingIcon(int centerX, int centerY, const uint16_t* spriteRow
 }
 static Departure s_trainCopy[MAX_DEPARTURES] = {};
 static Departure s_busCopy[MAX_DEPARTURES]   = {};
+static WeatherData s_weatherCopy = {};
+static bool s_weatherValidCopy = false;
 
 static void drawTopRightStatus()
 {
@@ -189,6 +192,248 @@ static void formatDepartureTime(unsigned long unixTimestamp, char* out, size_t o
     }
 
     snprintf(out, outSize, "%02d:%02d", departureTime.tm_hour, departureTime.tm_min);
+}
+
+static void formatTempWithDegree(float tempValue, bool valid, char* out, size_t outSize)
+{
+    if (out == nullptr || outSize == 0)
+    {
+        return;
+    }
+
+    if (!valid)
+    {
+        strlcpy(out, "xx\u00b0", outSize);
+        return;
+    }
+
+    snprintf(out, outSize, "%.0f\u00b0", tempValue);
+}
+
+static void drawArrowIcon(int x, int y, bool up, uint16_t color)
+{
+    if (up)
+    {
+        g_epaper.drawLine(x + 3, y + 7, x + 3, y + 1, color);
+        g_epaper.drawLine(x + 3, y + 1, x + 1, y + 3, color);
+        g_epaper.drawLine(x + 3, y + 1, x + 5, y + 3, color);
+    }
+    else
+    {
+        g_epaper.drawLine(x + 3, y + 1, x + 3, y + 7, color);
+        g_epaper.drawLine(x + 3, y + 7, x + 1, y + 5, color);
+        g_epaper.drawLine(x + 3, y + 7, x + 5, y + 5, color);
+    }
+}
+
+static void drawWeatherMetricIcons(int cardX,
+                                   int cardW,
+                                   int y,
+                                   uint16_t color)
+{
+    constexpr int iconSize = 8;
+    constexpr int gap = 10;
+    const int totalWidth = (iconSize * 3) + (gap * 2);
+    const int startX = cardX + ((cardW - totalWidth) / 2);
+
+    for (int i = 0; i < 3; ++i)
+    {
+        const int iconX = startX + (i * (iconSize + gap));
+        g_epaper.drawRect(iconX, y, iconSize, iconSize, color);
+    }
+}
+
+static void drawCenteredText(const char* text, int centerX, int y)
+{
+    g_epaper.setTextDatum(MC_DATUM);
+    g_epaper.drawString(text, centerX, y);
+    g_epaper.setTextDatum(TL_DATUM);
+}
+
+static void getHungarianWeekdayLabel(const char* isoDate, char* out, size_t outSize)
+{
+    if (out == nullptr || outSize == 0)
+    {
+        return;
+    }
+
+    strlcpy(out, "Nap", outSize);
+
+    if (isoDate == nullptr)
+    {
+        return;
+    }
+
+    int year = 0;
+    int month = 0;
+    int day = 0;
+    if (sscanf(isoDate, "%d-%d-%d", &year, &month, &day) != 3)
+    {
+        return;
+    }
+
+    struct tm dateTm = {};
+    dateTm.tm_year = year - 1900;
+    dateTm.tm_mon = month - 1;
+    dateTm.tm_mday = day;
+    dateTm.tm_isdst = -1;
+
+    if (mktime(&dateTm) == static_cast<time_t>(-1))
+    {
+        return;
+    }
+
+    switch (dateTm.tm_wday)
+    {
+        case 0: strlcpy(out, "Vasarnap", outSize); break;
+        case 1: strlcpy(out, "Hetfo", outSize); break;
+        case 2: strlcpy(out, "Kedd", outSize); break;
+        case 3: strlcpy(out, "Szerda", outSize); break;
+        case 4: strlcpy(out, "Csutortok", outSize); break;
+        case 5: strlcpy(out, "Pentek", outSize); break;
+        case 6: strlcpy(out, "Szombat", outSize); break;
+        default: break;
+    }
+}
+
+static void drawWeatherCards(const WeatherData* weather, bool hasWeather)
+{
+    constexpr int bigX = WEATHER_SECTION_X + 5;
+    constexpr int bigY = WAEATHER_SECTION_Y;
+    constexpr int bigW = 170;
+    constexpr int bigH = 215;
+
+    constexpr int smallY = WAEATHER_SECTION_Y;
+    constexpr int smallW = 90;
+    constexpr int smallH = 215;
+    constexpr int smallXs[3] = {
+        WEATHER_SECTION_X + 185,
+        WEATHER_SECTION_X + 285,
+        WEATHER_SECTION_X + 385
+    };
+
+    constexpr int iconReservedBottomY = WAEATHER_SECTION_Y + 72;
+    constexpr int dividerY = WAEATHER_SECTION_Y + 150;
+
+    g_epaper.setRotation(3);
+    g_epaper.setTextFont(2);
+
+    float todayMin = 0.0F;
+    float todayMax = 0.0F;
+
+    bool hasToday = false;
+    if (hasWeather && weather != nullptr)
+    {
+        if (weather->dailyCount > 0)
+        {
+            todayMin = weather->daily[0].tempMinC;
+            todayMax = weather->daily[0].tempMaxC;
+            hasToday = true;
+        }
+    }
+
+    char todayMainText[12] = {0};
+    char todayMaxText[12] = {0};
+    char todayMinText[12] = {0};
+
+    formatTempWithDegree(0.0F, false, todayMainText, sizeof(todayMainText));
+    formatTempWithDegree(0.0F, false, todayMaxText, sizeof(todayMaxText));
+    formatTempWithDegree(0.0F, false, todayMinText, sizeof(todayMinText));
+
+    if (hasWeather && weather != nullptr && hasToday)
+    {
+        formatTempWithDegree(weather->temperatureC, true, todayMainText, sizeof(todayMainText));
+        formatTempWithDegree(todayMax, true, todayMaxText, sizeof(todayMaxText));
+        formatTempWithDegree(todayMin, true, todayMinText, sizeof(todayMinText));
+    }
+
+    // Big blue card (Today / Ma)
+    g_epaper.fillRect(bigX + 1, bigY + 1, bigW - 2, bigH - 2, EINK_BLUE);
+    g_epaper.setTextColor(EINK_WHITE, EINK_BLUE, true);
+    g_epaper.drawString("MA", bigX + 10, bigY + 8);
+
+    g_epaper.setTextSize(3);
+    g_epaper.drawString(todayMainText, bigX + 10, iconReservedBottomY + 2);
+
+    drawArrowIcon(bigX + 106, iconReservedBottomY + 6, true, EINK_WHITE);
+    drawArrowIcon(bigX + 106, iconReservedBottomY + 24, false, EINK_WHITE);
+
+    g_epaper.setTextSize(1);
+    g_epaper.drawString(todayMaxText, bigX + 116, iconReservedBottomY + 4);
+    g_epaper.drawString(todayMinText, bigX + 116, iconReservedBottomY + 22);
+
+    drawCenteredText("demo_text", bigX + (bigW / 2), iconReservedBottomY + 34);
+
+    g_epaper.drawLine(bigX + 6, dividerY, bigX + bigW - 6, dividerY, EINK_WHITE);
+    drawWeatherMetricIcons(bigX, bigW, dividerY + 24, EINK_WHITE);
+
+    // Small white cards (Tomorrow + named weekdays)
+    for (int i = 0; i < 3; ++i)
+    {
+        const int cardX = smallXs[i];
+        g_epaper.fillRect(cardX + 1, smallY + 1, smallW - 2, smallH - 2, EINK_WHITE);
+
+        char label[20] = {0};
+        if (i == 0)
+        {
+            strlcpy(label, "Holnap", sizeof(label));
+        }
+        else if (hasWeather && weather != nullptr && weather->dailyCount > (i + 1))
+        {
+            getHungarianWeekdayLabel(weather->daily[i + 1].date, label, sizeof(label));
+        }
+        else
+        {
+            strlcpy(label, "Nap", sizeof(label));
+        }
+
+        float dayMin = 0.0F;
+        float dayMax = 0.0F;
+        float dayMain = 0.0F;
+        bool dayAvailable = false;
+
+        if (hasWeather && weather != nullptr && weather->dailyCount > (i + 1))
+        {
+            dayMin = weather->daily[i + 1].tempMinC;
+            dayMax = weather->daily[i + 1].tempMaxC;
+            dayMain = (dayMin + dayMax) / 2.0F;
+            dayAvailable = true;
+        }
+
+        char mainTempText[12] = {0};
+        char maxTempText[12] = {0};
+        char minTempText[12] = {0};
+
+        formatTempWithDegree(0.0F, false, mainTempText, sizeof(mainTempText));
+        formatTempWithDegree(0.0F, false, maxTempText, sizeof(maxTempText));
+        formatTempWithDegree(0.0F, false, minTempText, sizeof(minTempText));
+
+        if (dayAvailable)
+        {
+            formatTempWithDegree(dayMain, true, mainTempText, sizeof(mainTempText));
+            formatTempWithDegree(dayMax, true, maxTempText, sizeof(maxTempText));
+            formatTempWithDegree(dayMin, true, minTempText, sizeof(minTempText));
+        }
+
+        g_epaper.setTextColor(EINK_BLACK, EINK_WHITE, true);
+        g_epaper.setTextSize(1);
+        g_epaper.drawString(label, cardX + 6, smallY + 8);
+
+        g_epaper.setTextSize(3);
+        g_epaper.drawString(mainTempText, cardX + 6, iconReservedBottomY + 2);
+
+        drawArrowIcon(cardX + 52, iconReservedBottomY + 6, true, EINK_BLACK);
+        drawArrowIcon(cardX + 52, iconReservedBottomY + 24, false, EINK_BLACK);
+
+        g_epaper.setTextSize(1);
+        g_epaper.drawString(maxTempText, cardX + 60, iconReservedBottomY + 4);
+        g_epaper.drawString(minTempText, cardX + 60, iconReservedBottomY + 22);
+
+        drawCenteredText("demo_text", cardX + (smallW / 2), iconReservedBottomY + 34);
+
+        g_epaper.drawLine(cardX + 5, dividerY, cardX + smallW - 5, dividerY, EINK_BLACK);
+        drawWeatherMetricIcons(cardX, smallW, dividerY + 24, EINK_BLACK);
+    }
 }
 
 static void ellipsizeToWidth(const char* src, char* out, size_t outSize, int maxWidthPx)
@@ -661,10 +906,25 @@ void displayTask(void* /*pvParameters*/)
             xSemaphoreGive(g_departuresMutex);
         }
 
+        if (refreshData && xSemaphoreTake(g_weatherMutex, pdMS_TO_TICKS(200)) == pdTRUE)
+        {
+            s_weatherValidCopy = g_weatherValid;
+            if (s_weatherValidCopy)
+            {
+                s_weatherCopy = g_weatherData;
+            }
+            else
+            {
+                s_weatherCopy = {};
+            }
+            xSemaphoreGive(g_weatherMutex);
+        }
+
         if (shouldUpdate && takeDisplayMutex(pdMS_TO_TICKS(500)))
         {
             if (refreshData)
             {
+                drawWeatherCards(&s_weatherCopy, s_weatherValidCopy);
                 displayLineData(s_busCopy, busCount, BUS_SECTION_X, BUS_SECTION_Y + 43, EINK_YELLOW);
                 displayLineData(s_trainCopy, trainCount, TRAIN_SECTION_X, TRAIN_SECTION_Y + 43, EINK_BLUE);
             }
