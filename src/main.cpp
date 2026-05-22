@@ -3,6 +3,7 @@
 #include "wifi_manager.h"
 #include "mqtt_manager.h"
 #include "departures.h"
+#include "weather.h"
 #include "display_manager.h"
 #include "time_manager.h"
 
@@ -26,6 +27,7 @@ void setup()
 
     // ── Synchronisation primitives ───────────────────────────────────────────
     departuresInit();          // creates g_departuresMutex
+    weatherInit();             // creates g_weatherMutex
     s_clientMutex    = xSemaphoreCreateMutex();
     s_wifiEventGroup = xEventGroupCreate();
 

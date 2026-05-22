@@ -8,3 +8,4 @@ settings.h
 include/settings.h
 build_log.txt
 EinkESP32_TransportBoard.code-workspace
+script/*

@@ -4,11 +4,14 @@
 #include <WiFi.h>
 #include <PubSubClient.h>
 #include <time.h>
+#include "weather.h"
+#include "settings.h"
 
 // Broker settings
-#define MQTT_SERVER   "192.168.0.138"
-#define MQTT_PORT     1883
-#define MQTT_SUB_TOPIC "bkk/stop"
+#define MQTT_SERVER SETTINGS_MQTT_SERVER
+#define MQTT_PORT SETTINGS_MQTT_PORT
+#define MQTT_SUB_TOPIC SETTINGS_MQTT_TOPIC_DEPARTURES
+#define MQTT_WEATHER_TOPIC SETTINGS_MQTT_TOPIC_WEATHER
 
 // PubSubClient RX/TX buffer – must fit the largest expected JSON payload
 #define MQTT_BUFFER_SIZE 2048
