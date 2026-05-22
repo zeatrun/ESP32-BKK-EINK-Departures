@@ -418,6 +418,178 @@ static const char* weatherCodeToHungarianText(int code)
     }
 }
 
+static const uint16_t* getWeatherSprite(int code)
+{
+    switch (code)
+    {
+        case 0:
+        case 1: return SPRITE_SUN_16X12;
+        
+        case 2:
+        case 3: return SPRITE_CLOUD_16X12;
+        
+        case 45:
+        case 48: return SPRITE_FOG_16X12;
+        
+        case 51:
+        case 53:
+        case 55:
+        case 56:
+        case 57:
+        case 61:
+        case 63:
+        case 65:
+        case 66:
+        case 67:
+        case 80:
+        case 81:
+        case 82: return SPRITE_RAIN_16X12;
+        
+        case 71:
+        case 73:
+        case 75:
+        case 77:
+        case 85:
+        case 86: return SPRITE_SNOW_16X12;
+        
+        case 95:
+        case 96:
+        case 99: return SPRITE_THUNDERSTORM_16X12;
+        
+        default: return nullptr;
+    }
+}
+
+static uint16_t getWeatherSpriteColor(int code)
+{
+    switch (code)
+    {
+        case 0:
+        case 1: return EINK_YELLOW;  // Sunny
+        case 2:
+        case 3: return EINK_BLACK;   // Cloudy
+        case 45:
+        case 48: return EINK_BLACK;  // Fog
+        case 51:
+        case 53:
+        case 55:
+        case 56:
+        case 57:
+        case 61:
+        case 63:
+        case 65:
+        case 66:
+        case 67:
+        case 80:
+        case 81:
+        case 82: return EINK_BLUE;   // Rain/Drizzle
+        case 71:
+        case 73:
+        case 75:
+        case 77:
+        case 85:
+        case 86: return EINK_BLUE;   // Snow
+        case 95:
+        case 96:
+        case 99: return EINK_BLACK;  // Thunderstorm
+        default: return EINK_BLACK;
+    }
+}
+
+static const unsigned char* getWeatherSpriteData(int code)
+{
+    switch (code)
+    {
+        case 0:
+        case 1: return gImage_weather_sunny;
+        case 2:
+        case 3: return gImage_weather_cloudy;
+        case 45:
+        case 48: return gImage_weather_fog;
+        case 51:
+        case 53:
+        case 55:
+        case 56:
+        case 57:
+        case 61:
+        case 63:
+        case 65:
+        case 66:
+        case 67:
+        case 80:
+        case 81:
+        case 82: return gImage_weather_rain;
+        case 71:
+        case 73:
+        case 75:
+        case 77:
+        case 85:
+        case 86: return gImage_weather_snow;
+        case 95:
+        case 96:
+        case 99: return gImage_weather_thunderstorm;
+        default: return nullptr;
+    }
+}
+
+static void drawWeatherSpriteScaled(int centerX, int centerY, const uint16_t* spriteRows, uint16_t spriteColor, int scale)
+{
+    if (spriteRows == nullptr || scale <= 0)
+        return;
+
+    const int scaledWidth = SPRITE_ICON_WIDTH * scale;
+    const int scaledHeight = SPRITE_ICON_HEIGHT * scale;
+    const int startX = centerX - (scaledWidth / 2);
+    const int startY = centerY - (scaledHeight / 2);
+
+    for (int row = 0; row < SPRITE_ICON_HEIGHT; ++row)
+    {
+        uint16_t bits = spriteRows[row];
+        for (int col = 0; col < SPRITE_ICON_WIDTH; ++col)
+        {
+            const uint16_t mask = static_cast<uint16_t>(1U << (SPRITE_ICON_WIDTH - 1 - col));
+            if ((bits & mask) == 0)
+                continue;
+
+            g_epaper.fillRect(startX + (col * scale), startY + (row * scale), scale, scale, spriteColor);
+        }
+    }
+}
+
+static void drawWeatherSpriteImage(int x, int y, const unsigned char* imageData)
+{
+    if (imageData == nullptr)
+        return;
+
+    constexpr int WIDTH = 64;
+    constexpr int HEIGHT = 48;
+
+    for (int row = 0; row < HEIGHT; ++row)
+    {
+        for (int col = 0; col < WIDTH; ++col)
+        {
+            const int pixelIndex = row * WIDTH + col;
+            const int byteIndex = pixelIndex / 4;
+            const int bitShift = (3 - (pixelIndex % 4)) * 2;
+            
+            const uint8_t byte_val = pgm_read_byte(&imageData[byteIndex]);
+            const uint8_t color_code = (byte_val >> bitShift) & 0x03;
+            
+            uint16_t color;
+            switch (color_code)
+            {
+                case 0: color = EINK_WHITE; break;   // 00
+                case 1: color = EINK_BLACK; break;   // 01
+                case 2: color = EINK_BLUE; break;    // 10
+                case 3: color = EINK_YELLOW; break;  // 11
+                default: color = EINK_WHITE; break;
+            }
+            
+            g_epaper.drawPixel(x + col, y + row, color);
+        }
+    }
+}
+
 static void drawWeatherCards(const WeatherData* weather, bool hasWeather)
 {
     constexpr int bigX = WEATHER_SECTION_X + 5;
@@ -485,6 +657,15 @@ static void drawWeatherCards(const WeatherData* weather, bool hasWeather)
     g_epaper.fillRect(bigX + 1, bigY + 1, bigW - 2, bigH - 2, EINK_BLUE);
     g_epaper.setTextColor(EINK_WHITE, EINK_BLUE, true);
     g_epaper.drawString("MA", bigX + 10, bigY + 8);
+
+    // Draw weather sprite on big card (right-aligned, 64x48 bytes)
+    const unsigned char* weatherSpriteData = getWeatherSpriteData(weather != nullptr ? weather->weatherCode : -1);
+    if (weatherSpriteData != nullptr)
+    {
+        constexpr int weatherSpriteX = bigX + bigW - 80;
+        constexpr int weatherSpriteY = bigY + 10;
+        drawWeatherSpriteImage(weatherSpriteX, weatherSpriteY, weatherSpriteData);
+    }
 
     constexpr int mainTempY = iconReservedBottomY + 2;
     constexpr int auxTopY = iconReservedBottomY + 7;
@@ -576,6 +757,19 @@ static void drawWeatherCards(const WeatherData* weather, bool hasWeather)
         g_epaper.setTextColor(EINK_BLACK, EINK_WHITE, true);
         g_epaper.setTextSize(1);
         drawCenteredText(label, cardX + (smallW / 2), smallY + 12);
+
+        // Draw weather sprite on small card (centered, 64x48 bytes)
+        const unsigned char* dayWeatherSpriteData = nullptr;
+        if (dayAvailable && hasWeather && weather != nullptr && weather->dailyCount > (i + 1))
+        {
+            dayWeatherSpriteData = getWeatherSpriteData(weather->daily[i + 1].weatherCode);
+        }
+        if (dayWeatherSpriteData != nullptr)
+        {
+            const int weatherSpriteX = cardX + (smallW / 2) - 32;  // 64 pixels wide / 2 = 32
+            const int weatherSpriteY = smallY + 20;
+            drawWeatherSpriteImage(weatherSpriteX, weatherSpriteY, dayWeatherSpriteData);
+        }
 
         constexpr int smallMainTempY = iconReservedBottomY + 2;
         constexpr int smallAuxTopY = iconReservedBottomY + 8;
