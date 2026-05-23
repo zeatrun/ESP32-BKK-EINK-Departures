@@ -418,117 +418,131 @@ static const char* weatherCodeToHungarianText(int code)
     }
 }
 
-static const uint16_t* getWeatherSprite(int code)
+static uint16_t* getWeatherSpriteData(int code, bool mainCard)
 {
     switch (code)
     {
         case 0:
-        case 1: return SPRITE_SUN_16X12;
-        
+            // Clear sky
+            if (mainCard)
+                return (uint16_t *)ClearSky_BlueBG_64x48;
+            else
+                return (uint16_t *)ClearSky_WhiteBG_64x48;
+        case 1: 
+            // Mainly clear
+            if (mainCard)
+                return (uint16_t *)MainlyClear_BlueBG_64x48;
+             else
+                return (uint16_t *)MainlyClear_WhiteBG_64x48;
         case 2:
-        case 3: return SPRITE_CLOUD_16X12;
-        
+            // Partly cloudy
+            if (mainCard)
+                return (uint16_t *)PartlyCloudy_BlueBG_64x48;
+            else
+                return (uint16_t *)PartlyCloudy_WhiteBG_64x48;
+        case 3:
+            // Overcast
+            if (mainCard)
+                return (uint16_t *)Overcast_BlueBG_64x48;
+            else
+                return (uint16_t *)Overcast_WhiteBG_64x48;
         case 45:
-        case 48: return SPRITE_FOG_16X12;
-        
+            // Fog light
+            if (mainCard)
+                return (uint16_t *)Fog_Light_BlueBG_64x48;
+            else
+                return (uint16_t *)Fog_Light_WhiteBG_64x48;
+        case 48: 
+            // Fog dense
+            if (mainCard)
+                return (uint16_t *)Fog_Dense_BlueBG_64x48;
+            else
+                return (uint16_t *)Fog_Dense_WhiteBG_64x48;
         case 51:
         case 53:
         case 55:
+            // Drizzle light-heavy
+            if (mainCard)
+                return (uint16_t *)Drizzle_BlueBG_64x48;
+            else
+                return (uint16_t *)Drizzle_WhiteBG_64x48;
         case 56:
         case 57:
+            // Freezing drizzle light-heavy
+            if (mainCard)
+                return (uint16_t *)Freezing_Drizzle_BlueBG_64x48;
+            else
+                return (uint16_t *)Freezing_Drizzle_WhiteBG_64x48;
         case 61:
         case 63:
+            // Rain light-moderate
+            if (mainCard)
+                return (uint16_t *)Light_Medium_Rain_BlueBG_64x48;
+            else
+                return (uint16_t *)Light_Medium_Rain_WhiteBG_64x48;
         case 65:
+            // Rain heavy
+            if (mainCard)
+                return (uint16_t *)Heavy_Rain_BlueBG_64x48;
+            else
+                return (uint16_t *)Heavy_Rain_WhiteBG_64x48;
         case 66:
         case 67:
-        case 80:
-        case 81:
-        case 82: return SPRITE_RAIN_16X12;
-        
+            // Freezing rain light-heavy
+            if (mainCard)
+                return (uint16_t *)Freezing_Rain_BlueBG_64x48;
+            else
+                return (uint16_t *)Freezing_Rain_WhiteBG_64x48;
         case 71:
         case 73:
+            // Snow light-moderate
+            if (mainCard)
+                return (uint16_t *)Light_Medium_Snow_BlueBG_64x48;
+            else
+                return (uint16_t *)Light_Medium_Snow_WhiteBG_64x48;
         case 75:
+            // Snow heavy
+            if (mainCard)
+                return (uint16_t *)Heavy_Snow_BlueBG_64x48;
+            else
+                return (uint16_t *)Heavy_Snow_WhiteBG_64x48;
         case 77:
-        case 85:
-        case 86: return SPRITE_SNOW_16X12;
-        
-        case 95:
-        case 96:
-        case 99: return SPRITE_THUNDERSTORM_16X12;
-        
-        default: return nullptr;
-    }
-}
-
-static uint16_t getWeatherSpriteColor(int code)
-{
-    switch (code)
-    {
-        case 0:
-        case 1: return EINK_YELLOW;  // Sunny
-        case 2:
-        case 3: return EINK_BLACK;   // Cloudy
-        case 45:
-        case 48: return EINK_BLACK;  // Fog
-        case 51:
-        case 53:
-        case 55:
-        case 56:
-        case 57:
-        case 61:
-        case 63:
-        case 65:
-        case 66:
-        case 67:
+            // Snow grains
+            if (mainCard)
+                return (uint16_t *)Snow_Grains_BlueBG_64x48;
+            else
+                return (uint16_t *)Snow_Grains_WhiteBG_64x48;
         case 80:
         case 81:
-        case 82: return EINK_BLUE;   // Rain/Drizzle
-        case 71:
-        case 73:
-        case 75:
-        case 77:
+        case 82: 
+            // Rain shower light-moderate-heavy
+            if (mainCard)
+                return (uint16_t *)Heavy_Rain_BlueBG_64x48;
+            else
+                return (uint16_t *)Heavy_Rain_WhiteBG_64x48;
         case 85:
-        case 86: return EINK_BLUE;   // Snow
+        case 86: 
+            // Snow shower light-heavy
+            if (mainCard)
+                return (uint16_t *)Snow_Grains_BlueBG_64x48;
+            else
+                return (uint16_t *)Snow_Grains_WhiteBG_64x48;
         case 95:
+            // Thunderstorm
+            if (mainCard)
+                return (uint16_t *)Thunderstorm_BlueBG_64x48;
+            else
+                return (uint16_t *)Thunderstorm_WhiteBG_64x48;
         case 96:
-        case 99: return EINK_BLACK;  // Thunderstorm
-        default: return EINK_BLACK;
-    }
-}
-
-static const unsigned char* getWeatherSpriteData(int code)
-{
-    switch (code)
-    {
-        case 0:
-        case 1: return gImage_weather_sunny;
-        case 2:
-        case 3: return gImage_weather_cloudy;
-        case 45:
-        case 48: return gImage_weather_fog;
-        case 51:
-        case 53:
-        case 55:
-        case 56:
-        case 57:
-        case 61:
-        case 63:
-        case 65:
-        case 66:
-        case 67:
-        case 80:
-        case 81:
-        case 82: return gImage_weather_rain;
-        case 71:
-        case 73:
-        case 75:
-        case 77:
-        case 85:
-        case 86: return gImage_weather_snow;
-        case 95:
-        case 96:
-        case 99: return gImage_weather_thunderstorm;
-        default: return nullptr;
+        case 99: 
+            // Thunderstorm with slight-heavy hail
+            if (mainCard)
+                return (uint16_t *)Thunderstorm_Slight_Heavy_Hail_BlueBG_64x48;
+            else
+                return (uint16_t *)Thunderstorm_Slight_Heavy_Hail_WhiteBG_64x48;
+        default: 
+            // Unknown weather code
+            return nullptr;
     }
 }
 
@@ -556,38 +570,12 @@ static void drawWeatherSpriteScaled(int centerX, int centerY, const uint16_t* sp
     }
 }
 
-static void drawWeatherSpriteImage(int x, int y, const unsigned char* imageData)
+static void drawWeatherSpriteImage(int x, int y, uint16_t* imageData)
 {
     if (imageData == nullptr)
         return;
 
-    constexpr int WIDTH = 64;
-    constexpr int HEIGHT = 48;
-
-    for (int row = 0; row < HEIGHT; ++row)
-    {
-        for (int col = 0; col < WIDTH; ++col)
-        {
-            const int pixelIndex = row * WIDTH + col;
-            const int byteIndex = pixelIndex / 4;
-            const int bitShift = (3 - (pixelIndex % 4)) * 2;
-            
-            const uint8_t byte_val = pgm_read_byte(&imageData[byteIndex]);
-            const uint8_t color_code = (byte_val >> bitShift) & 0x03;
-            
-            uint16_t color;
-            switch (color_code)
-            {
-                case 0: color = EINK_WHITE; break;   // 00
-                case 1: color = EINK_BLACK; break;   // 01
-                case 2: color = EINK_BLUE; break;    // 10
-                case 3: color = EINK_YELLOW; break;  // 11
-                default: color = EINK_WHITE; break;
-            }
-            
-            g_epaper.drawPixel(x + col, y + row, color);
-        }
-    }
+    g_epaper.pushImage(x, y, 64, 48, (uint16_t *)imageData);
 }
 
 static void drawWeatherCards(const WeatherData* weather, bool hasWeather)
@@ -659,7 +647,7 @@ static void drawWeatherCards(const WeatherData* weather, bool hasWeather)
     g_epaper.drawString("MA", bigX + 10, bigY + 8);
 
     // Draw weather sprite on big card (right-aligned, 64x48 bytes)
-    const unsigned char* weatherSpriteData = getWeatherSpriteData(weather != nullptr ? weather->weatherCode : -1);
+    uint16_t * weatherSpriteData = getWeatherSpriteData(weather != nullptr ? weather->weatherCode : -1, true);
     if (weatherSpriteData != nullptr)
     {
         constexpr int weatherSpriteX = bigX + bigW - 80;
@@ -759,10 +747,10 @@ static void drawWeatherCards(const WeatherData* weather, bool hasWeather)
         drawCenteredText(label, cardX + (smallW / 2), smallY + 12);
 
         // Draw weather sprite on small card (centered, 64x48 bytes)
-        const unsigned char* dayWeatherSpriteData = nullptr;
+        uint16_t * dayWeatherSpriteData = nullptr;
         if (dayAvailable && hasWeather && weather != nullptr && weather->dailyCount > (i + 1))
         {
-            dayWeatherSpriteData = getWeatherSpriteData(weather->daily[i + 1].weatherCode);
+            dayWeatherSpriteData = getWeatherSpriteData(weather->daily[i + 1].weatherCode, false);
         }
         if (dayWeatherSpriteData != nullptr)
         {
@@ -1196,7 +1184,7 @@ void displayEmptyBackground()
                SPRITE_ICON_HEIGHT,
                1,
                EINK_BLACK);
-    g_epaper.drawString("BUSZMEGALLO", BUS_SECTION_X + 40, BUS_SECTION_Y + 5);
+    g_epaper.drawString("BUSZ INDULASOK", BUS_SECTION_X + 40, BUS_SECTION_Y + 5);
 
     g_epaper.setRotation(3);
     g_epaper.setTextColor(EINK_WHITE, EINK_BLUE, true);
@@ -1207,7 +1195,7 @@ void displayEmptyBackground()
                SPRITE_ICON_HEIGHT,
                1,
                EINK_WHITE);
-    g_epaper.drawString("VONAT MEGALLO", TRAIN_SECTION_X + 40, TRAIN_SECTION_Y + 5);
+    g_epaper.drawString("VONAT INDULASOK", TRAIN_SECTION_X + 40, TRAIN_SECTION_Y + 5);
 
     g_epaper.setRotation(3);
     g_epaper.setTextColor(EINK_BLACK, EINK_WHITE, true);
