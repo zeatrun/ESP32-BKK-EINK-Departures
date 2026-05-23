@@ -167,6 +167,48 @@ This allows direct includes like:
 #include "PartlyCloudy_WhiteBG_64x48.h"
 ```
 
+## Custom Fonts (UTF-8 Hungarian)
+
+The display layer supports UTF-8 Hungarian text with custom Noto Sans smooth fonts loaded from SPIFFS.
+
+### Supported font files
+
+Place these files in [data](data) and upload filesystem image:
+- NotoSansHU12.vlw
+- NotoSansHU16.vlw
+- NotoSansHU24.vlw
+- NotoSansHU32.vlw
+
+If some sizes are missing, the firmware uses fallback order:
+- 16 -> 24 -> 12 -> 32
+
+### Generate `.vlw` fonts
+
+Use the included Processing tool:
+- [lib/Seeed_GFX-master/Tools/Create_Smooth_Font/Create_font/Create_font.pde](lib/Seeed_GFX-master/Tools/Create_Smooth_Font/Create_font/Create_font.pde)
+
+Recommended settings for this project:
+- font family: Noto Sans
+- sizes: 12, 16, 24, 32 (generate one file per size)
+- unicode blocks: Basic Latin, Latin-1 Supplement, Latin Extended-A
+- anti-aliasing: disabled (`smooth = false`) for cleaner single-color glyph edges on e-ink
+
+### Upload to device
+
+Filesystem type is configured as SPIFFS in [platformio.ini](platformio.ini).
+
+From project root:
+
+1. Upload font files to SPIFFS
+	- `platformio run -t uploadfs`
+2. Upload firmware
+	- `platformio run -t upload`
+
+### Runtime behavior
+
+- If no Noto font files are found in SPIFFS, the firmware falls back to built-in fonts.
+- UTF-8 text rendering is enabled in display initialization.
+
 ## Troubleshooting
 
 - No MQTT updates on display:

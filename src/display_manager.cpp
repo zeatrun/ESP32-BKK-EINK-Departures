@@ -186,16 +186,15 @@ static void drawTopRightStatus()
     constexpr int topClearWidth = 120;
     constexpr int topClearHeight = 16;
 
-    constexpr int mqttTimeX = STATUS_SECTION_X + 425;
-    constexpr int mqttTimeY = STATUS_SECTION_Y + 30;
+    constexpr int mqttTimeX = STATUS_SECTION_X + 75;
+    constexpr int mqttTimeY = STATUS_SECTION_Y + 34;
     constexpr int mqttClearWidth = 80;
     constexpr int mqttClearHeight = 16;
 
     constexpr int dotRadius = 5;
-    constexpr int dotX = STATUS_SECTION_X + 472;
-    constexpr int dotY = STATUS_SECTION_Y + 38;
+    constexpr int dotX = STATUS_SECTION_X + 123;
+    constexpr int dotY = STATUS_SECTION_Y + 42;
 
-    g_epaper.fillRect(topX, topY, topClearWidth, topClearHeight, EINK_WHITE);
     g_epaper.fillRect(mqttTimeX, mqttTimeY, mqttClearWidth, mqttClearHeight, EINK_WHITE);
 
     struct tm updateTime = {};
@@ -223,8 +222,8 @@ static void drawBoldText(const char* text, int x, int y)
         return;
     }
 
-    g_epaper.drawString(text, x, y);
-    g_epaper.drawString(text, x + 1, y);
+    drawStringUtf8(text, x, y, 12);
+    drawStringUtf8(text, x + 1, y, 12);
 }
 
 static void drawBoldTextRight(const char* text, int rightX, int y)
@@ -899,7 +898,13 @@ static void ellipsizeToWidth(const char* src, char* out, size_t outSize, int max
     size_t len = strlen(out);
     while (len > 0)
     {
-        out[--len] = '\0';
+        // Remove one full UTF-8 code point (not just one byte) from the end.
+        --len;
+        while (len > 0 && (static_cast<unsigned char>(out[len]) & 0xC0U) == 0x80U)
+        {
+            --len;
+        }
+        out[len] = '\0';
 
         char candidate[128] = {0};
         strlcpy(candidate, out, sizeof(candidate));
@@ -1162,7 +1167,7 @@ void displayLineData(const Departure* departures, int count, int x, int y, uint1
         }
         if (routeText[0] != '\0')
         {
-            g_epaper.drawString(routeText, textX, bottomLineY);
+            drawStringUtf8(routeText, textX, bottomLineY, 12);
         }
 
         char etaText[6] = {0};
@@ -1267,7 +1272,7 @@ void displayEmptyBackground()
                SPRITE_ICON_HEIGHT,
                1,
                EINK_BLACK);
-    drawStringUtf8("BUSZ INDULÁSOK", BUS_SECTION_X + 40, BUS_SECTION_Y + 5, 24);
+    drawStringUtf8("BUSZ INDULÁSOK", BUS_SECTION_X + 36, BUS_SECTION_Y + 8, 32);
 
     g_epaper.setRotation(3);
     g_epaper.setTextColor(EINK_WHITE, EINK_BLUE, true);
@@ -1278,24 +1283,24 @@ void displayEmptyBackground()
                SPRITE_ICON_HEIGHT,
                1,
                EINK_WHITE);
-    drawStringUtf8("VONAT INDULÁSOK", TRAIN_SECTION_X + 40, TRAIN_SECTION_Y + 5, 24);
+    drawStringUtf8("VONAT INDULÁSOK", TRAIN_SECTION_X + 36, TRAIN_SECTION_Y + 8, 32);
 
     g_epaper.setRotation(3);
     g_epaper.setTextColor(EINK_BLACK, EINK_WHITE, true);
-    drawStringUtf8("IDŐJÁRÁS ÉS MENETREND", STATUS_SECTION_X + 20, STATUS_SECTION_Y + 5, 24);
+    drawStringUtf8("IDŐJÁRÁS ÉS MENETREND", STATUS_SECTION_X + 5, STATUS_SECTION_Y + 5, 32);
 
     g_epaper.setTextSize(1);
     g_epaper.setRotation(3);
     g_epaper.setTextColor(EINK_BLACK, EINK_WHITE, true);
-    drawStringUtf8("Frissítve:", STATUS_SECTION_X + 355, STATUS_SECTION_Y + 30, 16);
+    drawStringUtf8("Frissítve:", STATUS_SECTION_X + 5, STATUS_SECTION_Y + 35, 16);
 
     g_epaper.setRotation(3);
     g_epaper.setTextColor(EINK_WHITE, EINK_BLUE, true);
-    drawStringUtf8("Pilisvörösvár", TRAIN_SECTION_X + 380, TRAIN_SECTION_Y + 12, 16);
+    drawStringUtf8("Pilisvörösvár", TRAIN_SECTION_X + 370, TRAIN_SECTION_Y + 12, 16);
 
     g_epaper.setRotation(3);
     g_epaper.setTextColor(EINK_BLACK, EINK_YELLOW, true);
-    drawStringUtf8("Pilisszentiván - PEVDI", BUS_SECTION_X + 330, BUS_SECTION_Y + 12, 16);
+    drawStringUtf8("Pilisszentiván - PEVDI", BUS_SECTION_X + 311, BUS_SECTION_Y + 12, 16);
 
     // Top-right MQTT status: last refresh time and connection indicator.
     drawTopRightStatus();
