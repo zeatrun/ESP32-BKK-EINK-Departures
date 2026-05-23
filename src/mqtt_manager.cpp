@@ -3,6 +3,7 @@
 #include "weather.h"
 #include "display_manager.h"
 #include <ArduinoJson.h>
+#include <math.h>
 
 // Matches the bit defined in wifi_manager.cpp
 #define WIFI_CONNECTED_BIT BIT0
@@ -16,6 +17,23 @@ static bool               s_hasLastUpdate  = false;
 static time_t             s_lastUpdateTs   = 0;
 static bool               s_seenDeparturePayload = false;
 static bool               s_seenWeatherPayload   = false;
+static bool               s_reportedInitIssue    = false;
+
+constexpr float WEATHER_FLOAT_EPSILON = 0.01F;
+
+enum class MqttPayloadType
+{
+    Unknown,
+    Departures,
+    Weather,
+};
+
+struct PayloadProcessResult
+{
+    bool parsed  = false;
+    bool applied = false;
+    bool changed = false;
+};
 
 static bool setMqttConnected(bool connected)
 {
@@ -28,6 +46,31 @@ static bool setMqttConnected(bool connected)
     }
     taskEXIT_CRITICAL(&s_stateMux);
     return changed;
+}
+
+static MqttPayloadType getPayloadType(const char* topic)
+{
+    if (topic == nullptr)
+    {
+        return MqttPayloadType::Unknown;
+    }
+
+    if (strcmp(topic, MQTT_SUB_TOPIC) == 0)
+    {
+        return MqttPayloadType::Departures;
+    }
+
+    if (strcmp(topic, MQTT_WEATHER_TOPIC) == 0)
+    {
+        return MqttPayloadType::Weather;
+    }
+
+    return MqttPayloadType::Unknown;
+}
+
+static bool floatEquals(float a, float b)
+{
+    return fabsf(a - b) < WEATHER_FLOAT_EPSILON;
 }
 
 static bool departureEquals(const Departure& a, const Departure& b)
@@ -75,15 +118,15 @@ static bool weatherEquals(const WeatherData& a, const WeatherData& b)
         || strncmp(a.locationName, b.locationName, sizeof(a.locationName)) != 0
         || strncmp(a.locationAdmin1, b.locationAdmin1, sizeof(a.locationAdmin1)) != 0
         || strncmp(a.locationCountry, b.locationCountry, sizeof(a.locationCountry)) != 0
-        || a.latitude != b.latitude
-        || a.longitude != b.longitude
+        || !floatEquals(a.latitude, b.latitude)
+        || !floatEquals(a.longitude, b.longitude)
         || strncmp(a.timezone, b.timezone, sizeof(a.timezone)) != 0
         || strncmp(a.currentTime, b.currentTime, sizeof(a.currentTime)) != 0
-        || a.temperatureC != b.temperatureC
-        || a.apparentTemperatureC != b.apparentTemperatureC
+        || !floatEquals(a.temperatureC, b.temperatureC)
+        || !floatEquals(a.apparentTemperatureC, b.apparentTemperatureC)
         || a.relativeHumidity != b.relativeHumidity
         || a.weatherCode != b.weatherCode
-        || a.windSpeedKmh != b.windSpeedKmh
+        || !floatEquals(a.windSpeedKmh, b.windSpeedKmh)
         || a.windDirectionDeg != b.windDirectionDeg
         || a.isDay != b.isDay
         || a.dailyCount != b.dailyCount)
@@ -100,6 +143,173 @@ static bool weatherEquals(const WeatherData& a, const WeatherData& b)
     }
 
     return true;
+}
+
+static PayloadProcessResult handleDeparturePayload(JsonVariantConst payloadRoot)
+{
+    PayloadProcessResult result = {};
+
+    JsonArrayConst arr = payloadRoot.as<JsonArrayConst>();
+    if (arr.isNull())
+    {
+        Serial.println("[MQTT] Departure payload is not a JSON array, skipping.");
+        return result;
+    }
+
+    result.parsed = true;
+
+    Departure nextBusDepartures[MAX_DEPARTURES]   = {};
+    Departure nextTrainDepartures[MAX_DEPARTURES] = {};
+    int nextBusCount   = 0;
+    int nextTrainCount = 0;
+
+    for (JsonObjectConst item : arr)
+    {
+        const char* line = item["line"] | "";
+        if (line[0] == '\0') continue;
+
+        // Buses have numeric line identifiers; trains use letter prefixes (Z, S, H, M...)
+        const bool isBus = isdigit(static_cast<unsigned char>(line[0]));
+
+        Departure* dest = isBus ? nextBusDepartures   : nextTrainDepartures;
+        int&       cnt  = isBus ? nextBusCount        : nextTrainCount;
+
+        if (cnt >= MAX_DEPARTURES) continue;
+
+        strlcpy(dest[cnt].line,        line,                      sizeof(dest[cnt].line));
+        strlcpy(dest[cnt].routeIdText, item["routeIdText"] | "",  sizeof(dest[cnt].routeIdText));
+        strlcpy(dest[cnt].destination, item["destination"] | "",  sizeof(dest[cnt].destination));
+        strlcpy(dest[cnt].stopName,    item["stopName"]    | "",  sizeof(dest[cnt].stopName));
+        dest[cnt].minutes   = item["minutes"]   | 0;
+        dest[cnt].timestamp = item["timestamp"] | 0UL;
+
+        ++cnt;
+    }
+
+    if (xSemaphoreTake(g_departuresMutex, pdMS_TO_TICKS(200)) == pdTRUE)
+    {
+        const bool busesSame = departuresEqual(g_busDepartures, g_busCount,
+                                               nextBusDepartures, nextBusCount);
+        const bool trainsSame = departuresEqual(g_trainDepartures, g_trainCount,
+                                                nextTrainDepartures, nextTrainCount);
+
+        result.changed = !(busesSame && trainsSame);
+        result.applied = true;
+        g_departuresValid = true;
+
+        if (result.changed)
+        {
+            g_busCount   = nextBusCount;
+            g_trainCount = nextTrainCount;
+
+            for (int i = 0; i < g_busCount; ++i)   g_busDepartures[i]   = nextBusDepartures[i];
+            for (int i = g_busCount; i < MAX_DEPARTURES; ++i) g_busDepartures[i] = {};
+
+            for (int i = 0; i < g_trainCount; ++i) g_trainDepartures[i] = nextTrainDepartures[i];
+            for (int i = g_trainCount; i < MAX_DEPARTURES; ++i) g_trainDepartures[i] = {};
+
+            Serial.print("[MQTT] Departures updated: ");
+            Serial.print(g_busCount);
+            Serial.print(" bus(es), ");
+            Serial.print(g_trainCount);
+            Serial.println(" train(s).");
+        }
+        else
+        {
+            Serial.println("[MQTT] No departure change; skipping display refresh.");
+        }
+
+        xSemaphoreGive(g_departuresMutex);
+    }
+    else
+    {
+        Serial.println("[MQTT] Could not acquire departures mutex.");
+    }
+
+    return result;
+}
+
+static PayloadProcessResult handleWeatherPayload(JsonVariantConst payloadRoot)
+{
+    PayloadProcessResult result = {};
+
+    JsonObjectConst root = payloadRoot.as<JsonObjectConst>();
+    if (root.isNull())
+    {
+        Serial.println("[MQTT] Weather payload is not a JSON object, skipping.");
+        return result;
+    }
+
+    result.parsed = true;
+
+    WeatherData nextWeather = {};
+
+    strlcpy(nextWeather.source, root["source"] | "", sizeof(nextWeather.source));
+    strlcpy(nextWeather.publishedAtUtc, root["publishedAtUtc"] | "", sizeof(nextWeather.publishedAtUtc));
+
+    JsonObjectConst location = root["location"].as<JsonObjectConst>();
+    strlcpy(nextWeather.locationName, location["name"] | "", sizeof(nextWeather.locationName));
+    strlcpy(nextWeather.locationAdmin1, location["admin1"] | "", sizeof(nextWeather.locationAdmin1));
+    strlcpy(nextWeather.locationCountry, location["country"] | "", sizeof(nextWeather.locationCountry));
+    nextWeather.latitude = location["latitude"] | 0.0F;
+    nextWeather.longitude = location["longitude"] | 0.0F;
+    strlcpy(nextWeather.timezone, location["timezone"] | "", sizeof(nextWeather.timezone));
+
+    JsonObjectConst current = root["current"].as<JsonObjectConst>();
+    strlcpy(nextWeather.currentTime, current["time"] | "", sizeof(nextWeather.currentTime));
+    nextWeather.temperatureC = current["temperatureC"] | 0.0F;
+    nextWeather.apparentTemperatureC = current["apparentTemperatureC"] | 0.0F;
+    nextWeather.relativeHumidity = current["relativeHumidity"] | 0;
+    nextWeather.weatherCode = current["weatherCode"] | 0;
+    nextWeather.windSpeedKmh = current["windSpeedKmh"] | 0.0F;
+    nextWeather.windDirectionDeg = current["windDirectionDeg"] | 0;
+    nextWeather.isDay = current["isDay"] | 0;
+
+    JsonArrayConst daily = root["daily"].as<JsonArrayConst>();
+    int dayIndex = 0;
+    for (JsonObjectConst day : daily)
+    {
+        if (dayIndex >= MAX_WEATHER_DAYS)
+        {
+            break;
+        }
+
+        strlcpy(nextWeather.daily[dayIndex].date,
+                day["date"] | "",
+                sizeof(nextWeather.daily[dayIndex].date));
+        nextWeather.daily[dayIndex].weatherCode = day["weatherCode"] | 0;
+        nextWeather.daily[dayIndex].tempMaxC = day["tempMaxC"] | 0.0F;
+        nextWeather.daily[dayIndex].tempMinC = day["tempMinC"] | 0.0F;
+        nextWeather.daily[dayIndex].precipMm = day["precipMm"] | 0.0F;
+        nextWeather.daily[dayIndex].precipProbMax = day["precipProbMax"] | 0;
+        ++dayIndex;
+    }
+    nextWeather.dailyCount = dayIndex;
+
+    if (xSemaphoreTake(g_weatherMutex, pdMS_TO_TICKS(200)) == pdTRUE)
+    {
+        result.changed = (!g_weatherValid) || (!weatherEquals(g_weatherData, nextWeather));
+        result.applied = true;
+
+        if (result.changed)
+        {
+            g_weatherData = nextWeather;
+            g_weatherValid = true;
+            Serial.println("[MQTT] Weather updated.");
+        }
+        else
+        {
+            Serial.println("[MQTT] No weather change; skipping display refresh.");
+        }
+
+        xSemaphoreGive(g_weatherMutex);
+    }
+    else
+    {
+        Serial.println("[MQTT] Could not acquire weather mutex.");
+    }
+
+    return result;
 }
 
 // ── Callback ────────────────────────────────────────────────────────────────
@@ -123,165 +333,19 @@ static void mqttCallback(char* topic, byte* payload, unsigned int length)
         return;
     }
 
-    bool payloadAccepted = false;
     bool changed = false;
     bool initialDataArrival = false;
 
-    if (strcmp(topic, MQTT_SUB_TOPIC) == 0)
+    const MqttPayloadType payloadType = getPayloadType(topic);
+    PayloadProcessResult result = {};
+
+    if (payloadType == MqttPayloadType::Departures)
     {
-        JsonArray arr = doc.as<JsonArray>();
-        if (arr.isNull())
-        {
-            Serial.println("[MQTT] Departure payload is not a JSON array, skipping.");
-            return;
-        }
-
-        Departure nextBusDepartures[MAX_DEPARTURES]   = {};
-        Departure nextTrainDepartures[MAX_DEPARTURES] = {};
-        int nextBusCount   = 0;
-        int nextTrainCount = 0;
-
-        for (JsonObject item : arr)
-        {
-            const char* line = item["line"] | "";
-            if (line[0] == '\0') continue;
-
-            // Buses have numeric line identifiers; trains use letter prefixes (Z, S, H, M…)
-            bool isBus = isdigit(static_cast<unsigned char>(line[0]));
-
-            Departure* dest = isBus ? nextBusDepartures   : nextTrainDepartures;
-            int&       cnt  = isBus ? nextBusCount        : nextTrainCount;
-
-            if (cnt >= MAX_DEPARTURES) continue;
-
-            strlcpy(dest[cnt].line,        line,                      sizeof(dest[cnt].line));
-            strlcpy(dest[cnt].routeIdText, item["routeIdText"] | "",  sizeof(dest[cnt].routeIdText));
-            strlcpy(dest[cnt].destination, item["destination"] | "",  sizeof(dest[cnt].destination));
-            strlcpy(dest[cnt].stopName,    item["stopName"]    | "",  sizeof(dest[cnt].stopName));
-            dest[cnt].minutes   = item["minutes"]   | 0;
-            dest[cnt].timestamp = item["timestamp"] | 0UL;
-
-            ++cnt;
-        }
-
-        payloadAccepted = true;
-
-        if (xSemaphoreTake(g_departuresMutex, pdMS_TO_TICKS(200)) == pdTRUE)
-        {
-            const bool busesSame = departuresEqual(g_busDepartures, g_busCount,
-                                                   nextBusDepartures, nextBusCount);
-            const bool trainsSame = departuresEqual(g_trainDepartures, g_trainCount,
-                                                    nextTrainDepartures, nextTrainCount);
-
-            changed = !(busesSame && trainsSame);
-
-            g_departuresValid = true;
-
-            if (changed)
-            {
-                g_busCount   = nextBusCount;
-                g_trainCount = nextTrainCount;
-
-                for (int i = 0; i < g_busCount; ++i)   g_busDepartures[i]   = nextBusDepartures[i];
-                for (int i = g_busCount; i < MAX_DEPARTURES; ++i) g_busDepartures[i] = {};
-
-                for (int i = 0; i < g_trainCount; ++i) g_trainDepartures[i] = nextTrainDepartures[i];
-                for (int i = g_trainCount; i < MAX_DEPARTURES; ++i) g_trainDepartures[i] = {};
-
-                Serial.print("[MQTT] Departures updated: ");
-                Serial.print(g_busCount);
-                Serial.print(" bus(es), ");
-                Serial.print(g_trainCount);
-                Serial.println(" train(s).");
-            }
-            else
-            {
-                Serial.println("[MQTT] No departure change; skipping display refresh.");
-            }
-
-            xSemaphoreGive(g_departuresMutex);
-        }
-        else
-        {
-            Serial.println("[MQTT] Could not acquire departures mutex.");
-        }
+        result = handleDeparturePayload(doc.as<JsonVariantConst>());
     }
-    else if (strcmp(topic, MQTT_WEATHER_TOPIC) == 0)
+    else if (payloadType == MqttPayloadType::Weather)
     {
-        JsonObject root = doc.as<JsonObject>();
-        if (root.isNull())
-        {
-            Serial.println("[MQTT] Weather payload is not a JSON object, skipping.");
-            return;
-        }
-
-        WeatherData nextWeather = {};
-
-        strlcpy(nextWeather.source, root["source"] | "", sizeof(nextWeather.source));
-        strlcpy(nextWeather.publishedAtUtc, root["publishedAtUtc"] | "", sizeof(nextWeather.publishedAtUtc));
-
-        JsonObject location = root["location"].as<JsonObject>();
-        strlcpy(nextWeather.locationName, location["name"] | "", sizeof(nextWeather.locationName));
-        strlcpy(nextWeather.locationAdmin1, location["admin1"] | "", sizeof(nextWeather.locationAdmin1));
-        strlcpy(nextWeather.locationCountry, location["country"] | "", sizeof(nextWeather.locationCountry));
-        nextWeather.latitude = location["latitude"] | 0.0F;
-        nextWeather.longitude = location["longitude"] | 0.0F;
-        strlcpy(nextWeather.timezone, location["timezone"] | "", sizeof(nextWeather.timezone));
-
-        JsonObject current = root["current"].as<JsonObject>();
-        strlcpy(nextWeather.currentTime, current["time"] | "", sizeof(nextWeather.currentTime));
-        nextWeather.temperatureC = current["temperatureC"] | 0.0F;
-        nextWeather.apparentTemperatureC = current["apparentTemperatureC"] | 0.0F;
-        nextWeather.relativeHumidity = current["relativeHumidity"] | 0;
-        nextWeather.weatherCode = current["weatherCode"] | 0;
-        nextWeather.windSpeedKmh = current["windSpeedKmh"] | 0.0F;
-        nextWeather.windDirectionDeg = current["windDirectionDeg"] | 0;
-        nextWeather.isDay = current["isDay"] | 0;
-
-        JsonArray daily = root["daily"].as<JsonArray>();
-        int dayIndex = 0;
-        for (JsonObject day : daily)
-        {
-            if (dayIndex >= MAX_WEATHER_DAYS)
-            {
-                break;
-            }
-
-            strlcpy(nextWeather.daily[dayIndex].date,
-                    day["date"] | "",
-                    sizeof(nextWeather.daily[dayIndex].date));
-            nextWeather.daily[dayIndex].weatherCode = day["weatherCode"] | 0;
-            nextWeather.daily[dayIndex].tempMaxC = day["tempMaxC"] | 0.0F;
-            nextWeather.daily[dayIndex].tempMinC = day["tempMinC"] | 0.0F;
-            nextWeather.daily[dayIndex].precipMm = day["precipMm"] | 0.0F;
-            nextWeather.daily[dayIndex].precipProbMax = day["precipProbMax"] | 0;
-            ++dayIndex;
-        }
-        nextWeather.dailyCount = dayIndex;
-
-        payloadAccepted = true;
-
-        if (xSemaphoreTake(g_weatherMutex, pdMS_TO_TICKS(200)) == pdTRUE)
-        {
-            changed = (!g_weatherValid) || (!weatherEquals(g_weatherData, nextWeather));
-
-            if (changed)
-            {
-                g_weatherData = nextWeather;
-                g_weatherValid = true;
-                Serial.println("[MQTT] Weather updated.");
-            }
-            else
-            {
-                Serial.println("[MQTT] No weather change; skipping display refresh.");
-            }
-
-            xSemaphoreGive(g_weatherMutex);
-        }
-        else
-        {
-            Serial.println("[MQTT] Could not acquire weather mutex.");
-        }
+        result = handleWeatherPayload(doc.as<JsonVariantConst>());
     }
     else
     {
@@ -289,14 +353,16 @@ static void mqttCallback(char* topic, byte* payload, unsigned int length)
         return;
     }
 
-    if (payloadAccepted)
+    changed = result.changed;
+
+    if (result.applied)
     {
-        if (strcmp(topic, MQTT_SUB_TOPIC) == 0 && !s_seenDeparturePayload)
+        if (payloadType == MqttPayloadType::Departures && !s_seenDeparturePayload)
         {
             s_seenDeparturePayload = true;
             initialDataArrival = true;
         }
-        else if (strcmp(topic, MQTT_WEATHER_TOPIC) == 0 && !s_seenWeatherPayload)
+        else if (payloadType == MqttPayloadType::Weather && !s_seenWeatherPayload)
         {
             s_seenWeatherPayload = true;
             initialDataArrival = true;
@@ -348,6 +414,19 @@ static void mqttTask(void* /*pvParameters*/)
 {
     for (;;)
     {
+        if (s_wifiEventGroup == nullptr || s_clientMutex == nullptr || s_mqttClient == nullptr)
+        {
+            if (!s_reportedInitIssue)
+            {
+                Serial.println("[MQTT] Manager not initialized; waiting for mqttManagerInit().");
+                s_reportedInitIssue = true;
+            }
+            setMqttConnected(false);
+            vTaskDelay(pdMS_TO_TICKS(250));
+            continue;
+        }
+        s_reportedInitIssue = false;
+
         const EventBits_t bits   = xEventGroupGetBits(s_wifiEventGroup);
         const bool        wifiUp = (bits & WIFI_CONNECTED_BIT) != 0;
 
@@ -450,6 +529,12 @@ void mqttManagerInit(EventGroupHandle_t connectedEventGroup,
 
 void mqttTaskStart()
 {
+    if (s_wifiEventGroup == nullptr || s_clientMutex == nullptr || s_mqttClient == nullptr)
+    {
+        Serial.println("[MQTT] mqttTaskStart called before mqttManagerInit; task not started.");
+        return;
+    }
+
     xTaskCreatePinnedToCore(
         mqttTask,
         "MQTTTask",
