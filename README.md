@@ -178,7 +178,12 @@ This allows direct includes like:
 - Build errors after config changes:
 	- check that [include/settings.h](include/settings.h) exists and is valid
 
-## License and Third-Party Code
+## License
+
+This project is licensed under the MIT License.
+See [LICENSE](LICENSE) for the full text.
+
+## Third-Party Code
 
 This repository includes third-party code under [lib/Seeed_GFX-master](lib/Seeed_GFX-master).
-Please review and comply with its upstream license files.
+Please review and comply with the upstream license files in that directory.
