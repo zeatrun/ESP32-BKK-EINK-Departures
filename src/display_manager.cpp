@@ -243,7 +243,8 @@ static void drawWeatherMetricsRow(int cardX,
                                   float windKmh,
                                   int precipPercent,
                                   int humidityPercent,
-                                  bool hasValues)
+                                  bool hasValues,
+                                  bool precipOnly = false)
 {
     const bool compact = cardW <= 100;
 
@@ -300,6 +301,11 @@ static void drawWeatherMetricsRow(int cardX,
                1,
                textColor);
     g_epaper.drawString(precipText, precipStartX + SPRITE_WEATHER_ICON_WIDTH + 2, topY);
+
+    if (precipOnly)
+    {
+        return;
+    }
 
     const int halfW = cardW / 2;
     const int windTextWidth = g_epaper.textWidth(windText);
@@ -657,7 +663,8 @@ static void drawWeatherCards(const WeatherData* weather, bool hasWeather)
                           todayWind,
                           todayPrecipPercent,
                           todayHumidity,
-                          hasWeather && hasToday);
+                          hasWeather && hasToday,
+                          false);
 
     // Small white cards (Tomorrow + named weekdays)
     for (int i = 0; i < 3; ++i)
@@ -683,9 +690,7 @@ static void drawWeatherCards(const WeatherData* weather, bool hasWeather)
         float dayMin = 0.0F;
         float dayMax = 0.0F;
         float dayMain = 0.0F;
-        float dayWind = 0.0F;
         int dayPrecipPercent = 0;
-        int dayHumidity = 0;
         bool dayAvailable = false;
 
         if (hasWeather && weather != nullptr && weather->dailyCount > (i + 1))
@@ -693,9 +698,7 @@ static void drawWeatherCards(const WeatherData* weather, bool hasWeather)
             dayMin = weather->daily[i + 1].tempMinC;
             dayMax = weather->daily[i + 1].tempMaxC;
             dayMain = (dayMin + dayMax) / 2.0F;
-            dayWind = weather->windSpeedKmh;
             dayPrecipPercent = weather->daily[i + 1].precipProbMax;
-            dayHumidity = weather->relativeHumidity;
             dayAvailable = true;
         }
 
@@ -754,13 +757,14 @@ static void drawWeatherCards(const WeatherData* weather, bool hasWeather)
         g_epaper.drawLine(cardX + 5, dividerY, cardX + smallW - 5, dividerY, EINK_BLACK);
         drawWeatherMetricsRow(cardX,
                               smallW,
-                              dividerY + 22,
+                              dividerY + 30,
                               EINK_BLACK,
                               EINK_WHITE,
-                              dayWind,
+                              0.0F,
                               dayPrecipPercent,
-                              dayHumidity,
-                              dayAvailable);
+                              0,
+                              dayAvailable,
+                              true);
     }
 }
 
