@@ -6,6 +6,10 @@
 #include "mqtt_manager.h"
 #include "weather.h"
 
+#if defined(ARDUINO_ARCH_ESP32)
+#include <SPIFFS.h>
+#endif
+
 static EPaper g_epaper;
 static SemaphoreHandle_t g_displayMutex = nullptr;
 static TaskHandle_t g_displayTaskHandle = nullptr;
@@ -77,6 +81,103 @@ static Departure s_trainCopy[MAX_DEPARTURES] = {};
 static Departure s_busCopy[MAX_DEPARTURES]   = {};
 static WeatherData s_weatherCopy = {};
 static bool s_weatherValidCopy = false;
+
+static bool s_notoFontCheckDone = false;
+static bool s_notoFontAvailable = false;
+static bool s_noto12Available = false;
+static bool s_noto16Available = false;
+static bool s_noto24Available = false;
+static bool s_noto32Available = false;
+
+static bool ensureNotoSansAvailable()
+{
+    if (s_notoFontCheckDone)
+    {
+        return s_notoFontAvailable;
+    }
+    s_notoFontCheckDone = true;
+
+#if defined(SMOOTH_FONT) && defined(ARDUINO_ARCH_ESP32)
+    if (!SPIFFS.begin(true))
+    {
+        Serial.println("[DISPLAY] SPIFFS init failed, Noto Sans disabled.");
+        return false;
+    }
+
+    s_noto12Available = SPIFFS.exists("/NotoSansHU12.vlw");
+    s_noto16Available = SPIFFS.exists("/NotoSansHU16.vlw");
+    s_noto24Available = SPIFFS.exists("/NotoSansHU24.vlw");
+    s_noto32Available = SPIFFS.exists("/NotoSansHU32.vlw");
+
+    if (!(s_noto12Available || s_noto16Available || s_noto24Available || s_noto32Available))
+    {
+        Serial.println("[DISPLAY] No NotoSansHU*.vlw found, fallback font will be used.");
+        return false;
+    }
+
+    s_notoFontAvailable = true;
+    Serial.print("[DISPLAY] Noto Sans HU fonts available: ");
+    if (s_noto12Available) Serial.print("12 ");
+    if (s_noto16Available) Serial.print("16 ");
+    if (s_noto24Available) Serial.print("24 ");
+    if (s_noto32Available) Serial.print("32 ");
+    Serial.println();
+#endif
+
+    return s_notoFontAvailable;
+}
+
+static const char* resolveNotoFontName(int requestedPt)
+{
+    switch (requestedPt)
+    {
+        case 12:
+            if (s_noto12Available) return "NotoSansHU12";
+            break;
+        case 16:
+            if (s_noto16Available) return "NotoSansHU16";
+            break;
+        case 24:
+            if (s_noto24Available) return "NotoSansHU24";
+            break;
+        case 32:
+            if (s_noto32Available) return "NotoSansHU32";
+            break;
+        default:
+            break;
+    }
+
+    // Fallback order tuned for readability in this UI.
+    if (s_noto16Available) return "NotoSansHU16";
+    if (s_noto24Available) return "NotoSansHU24";
+    if (s_noto12Available) return "NotoSansHU12";
+    if (s_noto32Available) return "NotoSansHU32";
+    return nullptr;
+}
+
+static void drawStringUtf8(const char* text, int x, int y, int requestedPt = 16)
+{
+    if (text == nullptr)
+    {
+        return;
+    }
+
+#if defined(SMOOTH_FONT) && defined(ARDUINO_ARCH_ESP32)
+    if (ensureNotoSansAvailable())
+    {
+        const char* fontName = resolveNotoFontName(requestedPt);
+        if (fontName != nullptr)
+        {
+            g_epaper.loadFont(fontName, SPIFFS);
+            g_epaper.drawString(text, x, y);
+            g_epaper.unloadFont();
+            return;
+        }
+    }
+#endif
+
+    g_epaper.drawString(text, x, y);
+}
 
 static void drawTopRightStatus()
 {
@@ -335,10 +436,10 @@ static void drawWeatherMetricsRow(int cardX,
     g_epaper.drawString(humidityText, humidityStartX + SPRITE_WEATHER_ICON_WIDTH + 2, bottomY + 5);
 }
 
-static void drawCenteredText(const char* text, int centerX, int y)
+static void drawCenteredText(const char* text, int centerX, int y, int fontPt = 16)
 {
     g_epaper.setTextDatum(MC_DATUM);
-    g_epaper.drawString(text, centerX, y);
+    drawStringUtf8(text, centerX, y, fontPt);
     g_epaper.setTextDatum(TL_DATUM);
 }
 
@@ -377,12 +478,12 @@ static void getHungarianWeekdayLabel(const char* isoDate, char* out, size_t outS
 
     switch (dateTm.tm_wday)
     {
-        case 0: strlcpy(out, "Vasarnap", outSize); break;
-        case 1: strlcpy(out, "Hetfo", outSize); break;
+        case 0: strlcpy(out, "Vasárnap", outSize); break;
+        case 1: strlcpy(out, "Hétfő", outSize); break;
         case 2: strlcpy(out, "Kedd", outSize); break;
         case 3: strlcpy(out, "Szerda", outSize); break;
-        case 4: strlcpy(out, "Csutortok", outSize); break;
-        case 5: strlcpy(out, "Pentek", outSize); break;
+        case 4: strlcpy(out, "Csütörtök", outSize); break;
+        case 5: strlcpy(out, "Péntek", outSize); break;
         case 6: strlcpy(out, "Szombat", outSize); break;
         default: break;
     }
@@ -394,29 +495,29 @@ static const char* weatherCodeToHungarianText(int code)
     {
         case 0: return "Napos";
         case 1: return "T. napos";
-        case 2: return "V. felhos";
+        case 2: return "V. felhős";
         case 3: return "Borult";
         case 45:
-        case 48: return "Kodos";
+        case 48: return "Ködös";
         case 51:
         case 53:
-        case 55: return "Szitallas";
+        case 55: return "Szitálás";
         case 56:
         case 57: return "Fagyos szit.";
         case 61:
         case 63:
-        case 65: return "Eso";
+        case 65: return "Eső";
         case 66:
-        case 67: return "Onos eso";
+        case 67: return "Ónos eső";
         case 71:
         case 73:
         case 75:
-        case 77: return "Ho";
+        case 77: return "Hó";
         case 80:
         case 81:
-        case 82: return "Zapor";
+        case 82: return "Zápor";
         case 85:
-        case 86: return "Hozapor";
+        case 86: return "Hózápor";
         case 95: return "Zivatar";
         case 96:
         case 99: return "Jeges zivatar";
@@ -830,6 +931,8 @@ void displayBegin()
     {
         g_epaper.begin();
         g_epaper.setRotation(3);
+        g_epaper.setAttribute(UTF8_SWITCH, true);
+        ensureNotoSansAvailable();
         xSemaphoreGive(g_displayMutex);
     }
 }
@@ -1148,12 +1251,12 @@ void displayEmptyBackground()
     g_epaper.setRotation(3);
     g_epaper.setTextColor(EINK_BLACK, EINK_WHITE, true);
     g_epaper.setTextFont(2);
-    g_epaper.drawString("Holnap", WEATHER_SECTION_X + 210, WAEATHER_SECTION_Y + 16);
+    drawStringUtf8("Holnap", WEATHER_SECTION_X + 210, WAEATHER_SECTION_Y + 16, 16);
 
     g_epaper.setTextSize(2);
     g_epaper.setRotation(3);
     g_epaper.setTextColor(EINK_WHITE, EINK_BLUE, true);
-    g_epaper.drawString("MA", WEATHER_SECTION_X + 15, WAEATHER_SECTION_Y + 5);
+    drawStringUtf8("Ma", WEATHER_SECTION_X + 15, WAEATHER_SECTION_Y + 5, 24);
 
     g_epaper.setRotation(3);
     g_epaper.setTextColor(EINK_BLACK, EINK_YELLOW, true);
@@ -1164,7 +1267,7 @@ void displayEmptyBackground()
                SPRITE_ICON_HEIGHT,
                1,
                EINK_BLACK);
-    g_epaper.drawString("BUSZ INDULASOK", BUS_SECTION_X + 40, BUS_SECTION_Y + 5);
+    drawStringUtf8("BUSZ INDULÁSOK", BUS_SECTION_X + 40, BUS_SECTION_Y + 5, 24);
 
     g_epaper.setRotation(3);
     g_epaper.setTextColor(EINK_WHITE, EINK_BLUE, true);
@@ -1175,24 +1278,24 @@ void displayEmptyBackground()
                SPRITE_ICON_HEIGHT,
                1,
                EINK_WHITE);
-    g_epaper.drawString("VONAT INDULASOK", TRAIN_SECTION_X + 40, TRAIN_SECTION_Y + 5);
+    drawStringUtf8("VONAT INDULÁSOK", TRAIN_SECTION_X + 40, TRAIN_SECTION_Y + 5, 24);
 
     g_epaper.setRotation(3);
     g_epaper.setTextColor(EINK_BLACK, EINK_WHITE, true);
-    g_epaper.drawString("IDOJARAS ES MENETREND", STATUS_SECTION_X + 20, STATUS_SECTION_Y + 5);
+    drawStringUtf8("IDŐJÁRÁS ÉS MENETREND", STATUS_SECTION_X + 20, STATUS_SECTION_Y + 5, 24);
 
     g_epaper.setTextSize(1);
     g_epaper.setRotation(3);
     g_epaper.setTextColor(EINK_BLACK, EINK_WHITE, true);
-    g_epaper.drawString("Frissitve:", STATUS_SECTION_X + 355, STATUS_SECTION_Y + 30);
+    drawStringUtf8("Frissítve:", STATUS_SECTION_X + 355, STATUS_SECTION_Y + 30, 16);
 
     g_epaper.setRotation(3);
     g_epaper.setTextColor(EINK_WHITE, EINK_BLUE, true);
-    g_epaper.drawString("Pilisvorosvar", TRAIN_SECTION_X + 380, TRAIN_SECTION_Y + 12);
+    drawStringUtf8("Pilisvörösvár", TRAIN_SECTION_X + 380, TRAIN_SECTION_Y + 12, 16);
 
     g_epaper.setRotation(3);
     g_epaper.setTextColor(EINK_BLACK, EINK_YELLOW, true);
-    g_epaper.drawString("Pilisszentivan - PEVDI", BUS_SECTION_X + 330, BUS_SECTION_Y + 12);
+    drawStringUtf8("Pilisszentiván - PEVDI", BUS_SECTION_X + 330, BUS_SECTION_Y + 12, 16);
 
     // Top-right MQTT status: last refresh time and connection indicator.
     drawTopRightStatus();
