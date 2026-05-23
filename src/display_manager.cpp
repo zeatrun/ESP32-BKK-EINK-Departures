@@ -546,30 +546,6 @@ static uint16_t* getWeatherSpriteData(int code, bool mainCard)
     }
 }
 
-static void drawWeatherSpriteScaled(int centerX, int centerY, const uint16_t* spriteRows, uint16_t spriteColor, int scale)
-{
-    if (spriteRows == nullptr || scale <= 0)
-        return;
-
-    const int scaledWidth = SPRITE_ICON_WIDTH * scale;
-    const int scaledHeight = SPRITE_ICON_HEIGHT * scale;
-    const int startX = centerX - (scaledWidth / 2);
-    const int startY = centerY - (scaledHeight / 2);
-
-    for (int row = 0; row < SPRITE_ICON_HEIGHT; ++row)
-    {
-        uint16_t bits = spriteRows[row];
-        for (int col = 0; col < SPRITE_ICON_WIDTH; ++col)
-        {
-            const uint16_t mask = static_cast<uint16_t>(1U << (SPRITE_ICON_WIDTH - 1 - col));
-            if ((bits & mask) == 0)
-                continue;
-
-            g_epaper.fillRect(startX + (col * scale), startY + (row * scale), scale, scale, spriteColor);
-        }
-    }
-}
-
 static void drawWeatherSpriteImage(int x, int y, uint16_t* imageData)
 {
     if (imageData == nullptr)
@@ -1334,16 +1310,6 @@ void displayNotifyDataChanged()
     {
         xTaskNotify(g_displayTaskHandle, DISPLAY_NOTIFY_DATA, eSetBits);
     }
-}
-
-void displayNotifyMinuteChanged()
-{
-    // Minute ticks are intentionally ignored to avoid frequent display refresh.
-}
-
-void displayNotifyStatusChanged()
-{
-    // Status-only refresh is disabled; status updates are shown on 10-minute data refreshes.
 }
 
 void displayTaskStart()

@@ -111,13 +111,12 @@ static void timeTask(void* /*pvParameters*/)
             {
                 if (lastMinute == -1)
                 {
-                    // Record the current minute on first read without notifying.
+                    // Record the current minute on first read.
                     lastMinute = now.tm_min;
                 }
                 else if (now.tm_min != lastMinute)
                 {
                     lastMinute = now.tm_min;
-                    displayNotifyMinuteChanged();
                 }
             }
         }
