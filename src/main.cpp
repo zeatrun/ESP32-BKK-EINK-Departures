@@ -29,8 +29,11 @@ void setup()
 
     if (StartupManager::isConfigMode())
     {
-        // TODO: launch config-mode web server
-        Serial.println("[MAIN] Config mode — normal startup skipped.");
+        if (!g_config.beginConfigMode())
+        {
+            Serial.println("[MAIN] Config mode failed to start.");
+        }
+        Serial.println("[MAIN] Config mode active.");
         return;
     }
 
@@ -65,6 +68,13 @@ void setup()
 // or other sensor work.
 void loop()
 {
+    if (StartupManager::isConfigMode())
+    {
+        g_config.handleConfigMode();
+        delay(5);
+        return;
+    }
+
     // Placeholder: later we can call this only on data-changed events.
     // displayRenderFromGlobals();
     vTaskDelay(pdMS_TO_TICKS(1000));

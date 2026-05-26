@@ -2,6 +2,9 @@
 
 #include <Arduino.h>
 
+class WebServer;
+class DNSServer;
+
 /**
  * @brief Runtime configuration holder.
  *
@@ -32,6 +35,21 @@ public:
      */
     void save();
 
+    // ── Config-mode runtime ──────────────────────────────────────────────────
+
+    /**
+     * Starts AP + HTTP configuration portal and renders the current settings
+     * on the display. Safe to call multiple times.
+     */
+    bool beginConfigMode();
+
+    /**
+     * Processes HTTP clients while running in config mode. Call from loop().
+     */
+    void handleConfigMode();
+
+    bool isConfigModeActive() const { return m_configModeActive; }
+
     // ── Accessors ─────────────────────────────────────────────────────────────
 
     const char* wifiSsid()     const { return m_wifiSsid; }
@@ -48,6 +66,8 @@ public:
      * Passed directly to configTzTime() / setenv("TZ", ...).
      */
     const char* timezone() const { return m_timezone; }
+    const char* configApSsid() const { return m_apSsid; }
+    const char* configApPassword() const { return m_apPassword; }
 
     // ── Mutators (used by the config-mode web server) ─────────────────────────
 
@@ -68,6 +88,17 @@ private:
     char     m_mqttTopicWeather[128]      = {};
     // POSIX TZ string — default: Central European Time with automatic DST.
     char     m_timezone[64]               = "CET-1CEST,M3.5.0,M10.5.0/3";
+
+    bool      m_configModeActive          = false;
+    char      m_apSsid[32]                = {};
+    char      m_apPassword[32]            = {};
+    WebServer* m_webServer                = nullptr;
+    DNSServer* m_dnsServer                = nullptr;
+    bool      m_webRoutesRegistered       = false;
+
+    void generateConfigApCredentials();
+    void renderConfigScreen();
+    void setupWebServerRoutes();
 };
 
 /** Global configuration instance, defined in configuration.cpp. */

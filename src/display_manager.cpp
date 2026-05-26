@@ -990,6 +990,99 @@ void displayDrawHeader(const char* title)
     }
 }
 
+void displayShowConfigurationScreen(const char* wifiSsid,
+                                    const char* wifiPassword,
+                                    const char* mqttServer,
+                                    uint16_t    mqttPort,
+                                    const char* mqttTopicDepartures,
+                                    const char* mqttTopicWeather,
+                                    const char* apSsid,
+                                    const char* apPassword)
+{
+    if (!takeDisplayMutex(pdMS_TO_TICKS(200)))
+    {
+        return;
+    }
+
+    g_epaper.setRotation(3);
+
+    const int screenW = g_epaper.width();
+    const int screenH = g_epaper.height();
+    const int imageSectionH = screenH / 3;
+    const int configTopY = imageSectionH;
+    const int centerX = screenW / 2;
+
+    g_epaper.fillScreen(EINK_WHITE);
+
+    // Top 1/3 reserved for a future image block.
+    g_epaper.fillRect(0, 0, screenW, imageSectionH, EINK_BLUE);
+    g_epaper.setTextColor(EINK_WHITE, EINK_BLUE, true);
+    drawCenteredText("KONFIGURÁCIÓS MÓD", centerX, (imageSectionH / 2) - 20, 24);
+    drawCenteredText("Itt jelenik meg a kép", centerX, (imageSectionH / 2) + 8, 16);
+    g_epaper.drawRect(10, 12, screenW - 20, imageSectionH - 24, EINK_WHITE);
+
+    // Bottom 2/3: centered configuration data.
+    g_epaper.setTextColor(EINK_BLACK, EINK_WHITE, true);
+    g_epaper.drawLine(0, configTopY, screenW, configTopY, EINK_BLACK);
+
+    drawCenteredText("Eszköz beállításai", centerX, configTopY + 18, 24);
+
+    const int fieldCount = 8;
+    const int firstRowY = configTopY + 42;
+    const int bottomPadding = 8;
+    int rowStep = (screenH - firstRowY - bottomPadding) / fieldCount;
+    if (rowStep < 32)
+    {
+        rowStep = 32;
+    }
+
+    auto drawCenteredBoldText = [&](const char* text, int y, int fontPt)
+    {
+        g_epaper.setTextDatum(MC_DATUM);
+        drawStringUtf8(text, centerX, y, fontPt);
+        drawStringUtf8(text, centerX + 1, y, fontPt);
+        g_epaper.setTextDatum(TL_DATUM);
+    };
+
+    auto drawConfigRow = [&](const char* label, const char* value, int rowBaseY)
+    {
+        char valueSafe[180] = {0};
+        strlcpy(valueSafe, (value != nullptr) ? value : "", sizeof(valueSafe));
+        if (valueSafe[0] == '\0')
+        {
+            strlcpy(valueSafe, "(nincs megadva)", sizeof(valueSafe));
+        }
+
+        if (strlen(valueSafe) > 48)
+        {
+            valueSafe[45] = '.';
+            valueSafe[46] = '.';
+            valueSafe[47] = '.';
+            valueSafe[48] = '\0';
+        }
+
+        g_epaper.setTextColor(EINK_BLACK, EINK_WHITE, true);
+        drawCenteredBoldText(label, rowBaseY + 6, 16);
+        drawCenteredText(valueSafe, centerX, rowBaseY + 20, 16);
+    };
+
+    char mqttPortStr[16] = {0};
+    snprintf(mqttPortStr, sizeof(mqttPortStr), "%u", static_cast<unsigned int>(mqttPort));
+
+    int rowY = firstRowY;
+    drawConfigRow("WiFi SSID", wifiSsid, rowY); rowY += rowStep;
+    drawConfigRow("WiFi jelszó", wifiPassword, rowY); rowY += rowStep;
+    drawConfigRow("MQTT szerver", mqttServer, rowY); rowY += rowStep;
+    drawConfigRow("MQTT port", mqttPortStr, rowY); rowY += rowStep;
+    drawConfigRow("Indulások téma", mqttTopicDepartures, rowY); rowY += rowStep;
+    drawConfigRow("Időjárás téma", mqttTopicWeather, rowY); rowY += rowStep;
+    drawConfigRow("AP SSID", apSsid, rowY); rowY += rowStep;
+    drawConfigRow("AP jelszó", apPassword, rowY);
+
+    g_epaper.update();
+    xSemaphoreGive(g_displayMutex);
+}
+
 void displayRenderDepartures(const Departure* trains,
                              int              trainCount,
                              const Departure* buses,

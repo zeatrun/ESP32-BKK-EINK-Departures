@@ -33,6 +33,14 @@ void displayWake();
 // Generic drawing helpers
 void displayClearWhite();
 void displayDrawHeader(const char* title);
+void displayShowConfigurationScreen(const char* wifiSsid,
+                                    const char* wifiPassword,
+                                    const char* mqttServer,
+                                    uint16_t    mqttPort,
+                                    const char* mqttTopicDepartures,
+                                    const char* mqttTopicWeather,
+                                    const char* apSsid,
+                                    const char* apPassword);
 
 // Skeletons for upcoming JSON/departure rendering
 void displayRenderDepartures(const Departure* trains,
