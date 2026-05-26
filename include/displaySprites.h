@@ -17,6 +17,7 @@
 #include "Snow_Grains_64x48.h"
 #include "Thunderstorm_64x48.h"
 #include "Thunderstorm_Slight_Heavy_Hail_64x48.h"
+#include "Bus_128x128.h"
 
 // 16x12 monochrome sprites, one uint16_t per row (MSB is leftmost pixel)
 constexpr int SPRITE_ICON_WIDTH  = 16;

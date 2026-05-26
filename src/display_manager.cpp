@@ -54,7 +54,7 @@ static void drawSprite(int x,
     }
 }
 
-static void drawSleepingIcon(int centerX, int centerY, const uint16_t* spriteRows, uint16_t spriteColor)
+static void drawSleepingIcon(int centerX, int centerY, const uint16_t *spriteRows, uint16_t spriteColor)
 {
     constexpr int iconScale = 2;
     const int iconW = SPRITE_ICON_WIDTH * iconScale;
@@ -62,14 +62,7 @@ static void drawSleepingIcon(int centerX, int centerY, const uint16_t* spriteRow
     const int iconX = centerX - (iconW / 2);
     const int iconY = centerY - (iconH / 2) + 8;
 
-    drawSprite(iconX,
-               iconY,
-               spriteRows,
-               SPRITE_ICON_WIDTH,
-               SPRITE_ICON_HEIGHT,
-               iconScale,
-               spriteColor);
-
+    g_epaper.pushImage(iconX, iconY, iconW, iconH, (uint16_t *)spriteRows);
     g_epaper.setTextColor(spriteColor, EINK_WHITE, true);
     g_epaper.setTextDatum(TL_DATUM);
     g_epaper.setTextSize(1);
@@ -1083,7 +1076,7 @@ void displayLineData(const Departure* departures, int count, int x, int y, uint1
 
         if (color == EINK_YELLOW)
         {
-            drawSleepingIcon(centerX, centerY, SPRITE_BUS_16X12, EINK_BLACK);
+            drawSleepingIcon(centerX, centerY, (uint16_t *)Bus_WhiteBG_128x128, EINK_BLACK);
         }
         else
         {
@@ -1296,11 +1289,11 @@ void displayEmptyBackground()
 
     g_epaper.setRotation(3);
     g_epaper.setTextColor(EINK_WHITE, EINK_BLUE, true);
-    drawStringUtf8("Pilisvörösvár", TRAIN_SECTION_X + 370, TRAIN_SECTION_Y + 12, 16);
+    drawStringUtf8("Pilisvörösvár", TRAIN_SECTION_X + 370, TRAIN_SECTION_Y + 14, 16);
 
     g_epaper.setRotation(3);
     g_epaper.setTextColor(EINK_BLACK, EINK_YELLOW, true);
-    drawStringUtf8("Pilisszentiván - PEVDI", BUS_SECTION_X + 311, BUS_SECTION_Y + 12, 16);
+    drawStringUtf8("Pilisszentiván - PEVDI", BUS_SECTION_X + 311, BUS_SECTION_Y + 14, 16);
 
     // Top-right MQTT status: last refresh time and connection indicator.
     drawTopRightStatus();
