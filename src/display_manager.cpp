@@ -5,6 +5,7 @@
 #include "TFT_eSPI.h"
 #include "mqtt_manager.h"
 #include "weather.h"
+#include <qrcode.h>
 
 #if defined(ARDUINO_ARCH_ESP32)
 #include <SPIFFS.h>
@@ -91,10 +92,28 @@ static bool ensureNotoSansAvailable()
     s_notoFontCheckDone = true;
 
 #if defined(SMOOTH_FONT) && defined(ARDUINO_ARCH_ESP32)
-    if (!SPIFFS.begin(true))
+    if (!SPIFFS.begin(false))
     {
         Serial.println("[DISPLAY] SPIFFS init failed, Noto Sans disabled.");
+        Serial.println("[DISPLAY] Tip: upload filesystem image (PlatformIO target: uploadfs).");
         return false;
+    }
+
+    Serial.printf("[DISPLAY] SPIFFS mounted. total=%u used=%u\n",
+                  static_cast<unsigned int>(SPIFFS.totalBytes()),
+                  static_cast<unsigned int>(SPIFFS.usedBytes()));
+
+    fs::File root = SPIFFS.open("/");
+    if (root)
+    {
+        fs::File file = root.openNextFile();
+        while (file)
+        {
+            Serial.printf("[DISPLAY] SPIFFS file: %s (%u bytes)\n",
+                          file.name(),
+                          static_cast<unsigned int>(file.size()));
+            file = root.openNextFile();
+        }
     }
 
     s_noto12Available = SPIFFS.exists("/NotoSansHU12.vlw");
@@ -115,6 +134,10 @@ static bool ensureNotoSansAvailable()
     if (s_noto24Available) Serial.print("24 ");
     if (s_noto32Available) Serial.print("32 ");
     Serial.println();
+#endif
+
+#if !defined(SMOOTH_FONT)
+    Serial.println("[DISPLAY] SMOOTH_FONT is not enabled in TFT setup, custom vlw fonts are disabled.");
 #endif
 
     return s_notoFontAvailable;
@@ -433,6 +456,83 @@ static void drawCenteredText(const char* text, int centerX, int y, int fontPt = 
     g_epaper.setTextDatum(MC_DATUM);
     drawStringUtf8(text, centerX, y, fontPt);
     g_epaper.setTextDatum(TL_DATUM);
+}
+
+static void appendWifiQrEscaped(char* dst, size_t dstSize, const char* src)
+{
+    if (dst == nullptr || dstSize == 0 || src == nullptr)
+    {
+        return;
+    }
+
+    for (const char* p = src; *p != '\0'; ++p)
+    {
+        if (*p == '\\' || *p == ';' || *p == ',' || *p == ':')
+        {
+            strlcat(dst, "\\", dstSize);
+        }
+
+        char one[2] = {*p, '\0'};
+        strlcat(dst, one, dstSize);
+    }
+}
+
+static bool drawWifiQrCodeInArea(int x,
+                                 int y,
+                                 int areaW,
+                                 int areaH,
+                                 const char* ssid,
+                                 const char* password)
+{
+    if (ssid == nullptr || ssid[0] == '\0' || areaW <= 40 || areaH <= 40)
+    {
+        return false;
+    }
+
+    char payload[220] = {0};
+    strlcpy(payload, "WIFI:T:WPA;S:", sizeof(payload));
+    appendWifiQrEscaped(payload, sizeof(payload), ssid);
+    strlcat(payload, ";P:", sizeof(payload));
+    appendWifiQrEscaped(payload, sizeof(payload), (password != nullptr) ? password : "");
+    strlcat(payload, ";;", sizeof(payload));
+
+    constexpr uint8_t qrVersion = 7;
+    uint8_t qrData[qrcode_getBufferSize(qrVersion)] = {0};
+    QRCode qr;
+    qrcode_initText(&qr, qrData, qrVersion, ECC_MEDIUM, payload);
+
+    const int modules = qr.size;
+    const int quietZone = 2;
+    const int maxModuleW = areaW / (modules + (quietZone * 2));
+    const int maxModuleH = areaH / (modules + (quietZone * 2));
+    int modulePx = (maxModuleW < maxModuleH) ? maxModuleW : maxModuleH;
+    if (modulePx < 1)
+    {
+        modulePx = 1;
+    }
+
+    const int qrDrawSize = modulePx * (modules + (quietZone * 2));
+    const int startX = x + ((areaW - qrDrawSize) / 2);
+    const int startY = y + ((areaH - qrDrawSize) / 2);
+
+    g_epaper.fillRect(startX, startY, qrDrawSize, qrDrawSize, EINK_WHITE);
+
+    for (int my = 0; my < modules; ++my)
+    {
+        for (int mx = 0; mx < modules; ++mx)
+        {
+            if (!qrcode_getModule(&qr, mx, my))
+            {
+                continue;
+            }
+
+            const int px = startX + ((mx + quietZone) * modulePx);
+            const int py = startY + ((my + quietZone) * modulePx);
+            g_epaper.fillRect(px, py, modulePx, modulePx, EINK_BLACK);
+        }
+    }
+
+    return true;
 }
 
 static void getHungarianWeekdayLabel(const char* isoDate, char* out, size_t outSize)
@@ -1017,8 +1117,17 @@ void displayShowConfigurationScreen(const char* wifiSsid,
     // Top 1/3 reserved for a future image block.
     g_epaper.fillRect(0, 0, screenW, imageSectionH, EINK_BLUE);
     g_epaper.setTextColor(EINK_WHITE, EINK_BLUE, true);
-    drawCenteredText("KONFIGURÁCIÓS MÓD", centerX, (imageSectionH / 2) - 20, 24);
-    drawCenteredText("Itt jelenik meg a kép", centerX, (imageSectionH / 2) + 8, 16);
+    drawCenteredText("KONFIGURÁCIÓS MÓD", centerX, 18, 24);
+    const bool qrRendered = drawWifiQrCodeInArea(12,
+                                                 34,
+                                                 screenW - 24,
+                                                 imageSectionH - 46,
+                                                 apSsid,
+                                                 apPassword);
+    if (!qrRendered)
+    {
+        drawCenteredText("QR-kód nem elérhető", centerX, (imageSectionH / 2) + 8, 16);
+    }
     g_epaper.drawRect(10, 12, screenW - 20, imageSectionH - 24, EINK_WHITE);
 
     // Bottom 2/3: centered configuration data.
