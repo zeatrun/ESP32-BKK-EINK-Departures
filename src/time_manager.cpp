@@ -1,5 +1,6 @@
 #include "time_manager.h"
 #include "display_manager.h"
+#include "configuration.h"
 
 #include <esp_sntp.h>
 #include <time.h>
@@ -57,11 +58,10 @@ static void timeTask(void* /*pvParameters*/)
 
     sntp_set_time_sync_notification_cb(onNtpSync);
 
-    // configTime sets the SNTP server and starts the periodic sync.
-    // After the first sync the ESP's internal timekeeping (RTC) continues
-    // to count even without WiFi.
-    // Timezone: CET (UTC+1) with DST (+1 hour in summer = UTC+2)
-    configTime(3600, 3600, NTP_SERVER);
+    // configTzTime accepts a POSIX TZ string and handles DST transitions
+    // automatically. The timezone is taken from g_config so it can later be
+    // changed by the user through the config-mode web interface.
+    configTzTime(g_config.timezone(), NTP_SERVER);
 
     for (;;)
     {

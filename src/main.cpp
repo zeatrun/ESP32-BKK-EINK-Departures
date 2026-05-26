@@ -1,5 +1,7 @@
 #include <Arduino.h>
 #include <WiFi.h>
+#include "startup_manager.h"
+#include "configuration.h"
 #include "wifi_manager.h"
 #include "mqtt_manager.h"
 #include "departures.h"
@@ -20,6 +22,17 @@ void setup()
     Serial.begin(115200);
     delay(2000);
     Serial.println("7.3\" E-Paper Departures and Weather Display");
+
+    // ── Boot mode detection ───────────────────────────────────────────────────
+    StartupManager::detect();
+    g_config.load();
+
+    if (StartupManager::isConfigMode())
+    {
+        // TODO: launch config-mode web server
+        Serial.println("[MAIN] Config mode — normal startup skipped.");
+        return;
+    }
 
     // ── E-Paper initialisation  ──────────────────────────────────────────────
     displayBegin();
