@@ -95,8 +95,12 @@ private:
     WebServer* m_webServer                = nullptr;
     DNSServer* m_dnsServer                = nullptr;
     bool      m_webRoutesRegistered       = false;
+    bool      m_rebootPending             = false;
+    uint32_t  m_rebootAtMs                = 0;
 
     void generateConfigApCredentials();
+    void loadDefaults();
+    void scheduleReboot(uint32_t delayMs);
     void renderConfigScreen();
     void setupWebServerRoutes();
 };
