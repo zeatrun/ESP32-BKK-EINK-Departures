@@ -4,6 +4,7 @@ ESP32 firmware for a 7.3 inch color e-paper board that shows:
 - public transport departures over MQTT
 - weather forecast over MQTT
 - connection/status information
+- on-device configuration portal (AP mode)
 
 The project is built with PlatformIO and runs on Seeed XIAO ESP32S3.
 
@@ -14,6 +15,7 @@ The board acts as an always-on information display:
 - subscribes to MQTT topics for departures and weather
 - stores and compares incoming payloads
 - refreshes the display only when needed (plus periodic policy in display task)
+- supports a boot-time config mode with captive portal for editing settings
 
 It is designed for low-noise updates on e-paper and for robust operation with reconnecting Wi-Fi/MQTT tasks.
 
@@ -25,11 +27,15 @@ It is designed for low-noise updates on e-paper and for robust operation with re
 - Build system: PlatformIO
 - MQTT client: PubSubClient
 - JSON parser: ArduinoJson
+- Captive DNS: DNSServer (Arduino-ESP32)
+- QR generator: QRCode
 - Graphics driver: Seeed_GFX (local library in lib/Seeed_GFX-master)
 
 ## Project Structure
 
 - [src/main.cpp](src/main.cpp): startup, task initialization order
+- [src/configuration.cpp](src/configuration.cpp): runtime settings, AP config mode, captive portal routes
+- [src/startup_manager.cpp](src/startup_manager.cpp): boot-time config button detection
 - [src/wifi_manager.cpp](src/wifi_manager.cpp): Wi-Fi connect/reconnect task
 - [src/mqtt_manager.cpp](src/mqtt_manager.cpp): MQTT connect/subscribe, payload parsing, shared data update
 - [src/display_manager.cpp](src/display_manager.cpp): rendering, layout, refresh logic
@@ -55,6 +61,24 @@ It is designed for low-noise updates on e-paper and for robust operation with re
 - upload_port
 - monitor_port
 
+## Config Mode (AP + Captive Portal)
+
+The firmware has a dedicated config mode that starts an access point and serves a local configuration page.
+
+How to enter config mode:
+- hold the config button on GPIO2 (XIAO ESP32S3 D1/A1) during boot
+- release after reset; startup logic decides mode at boot
+
+What happens in config mode:
+- the board starts a dedicated AP with generated SSID/password
+- a captive DNS server redirects common connectivity-check URLs to the local page
+- unknown HTTP paths are redirected to the config page
+- the display shows configuration data and a Wi-Fi QR code for quick AP join
+
+Notes:
+- Captive portal behavior depends on client OS heuristics (Android/iOS/Windows), but direct open to `http://192.168.4.1` always works.
+- Settings are currently runtime-only; persistent save is scaffolded but not implemented yet.
+
 ## Build and Flash
 
 From project root:
@@ -67,6 +91,15 @@ From project root:
 	 - platformio device monitor
 
 Or use the predefined PlatformIO tasks in VS Code.
+
+Filesystem (SPIFFS) commands:
+
+1. Build filesystem image
+	 - platformio run --target buildfs
+2. Upload filesystem image
+	 - platformio run --target uploadfs
+
+You only need filesystem upload when files under [data](data) change (fonts/images/web assets).
 
 ## MQTT Topics and Payloads
 
@@ -219,6 +252,13 @@ From project root:
 	- ensure 2.4 GHz network availability
 - Build errors after config changes:
 	- check that [include/settings.h](include/settings.h) exists and is valid
+- Captive portal page does not pop up automatically:
+	- open `http://192.168.4.1` manually after joining AP
+	- verify serial logs show AP and captive DNS started
+- NotoSansHU fonts not loading:
+	- verify `.vlw` files exist in [data](data) and were uploaded with `uploadfs`
+	- if only code changed, `uploadfs` is not required
+	- if mount/files seem broken, run `buildfs` + `uploadfs` again
 
 ## License
 
