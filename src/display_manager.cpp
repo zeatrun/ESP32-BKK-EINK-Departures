@@ -8,7 +8,7 @@
 #include <qrcode.h>
 
 #if defined(ARDUINO_ARCH_ESP32)
-#include <SPIFFS.h>
+#include <LittleFS.h>
 #endif
 
 static EPaper g_epaper;
@@ -92,34 +92,34 @@ static bool ensureNotoSansAvailable()
     s_notoFontCheckDone = true;
 
 #if defined(SMOOTH_FONT) && defined(ARDUINO_ARCH_ESP32)
-    if (!SPIFFS.begin(false))
+    if (!LittleFS.begin(false))
     {
-        Serial.println("[DISPLAY] SPIFFS init failed, Noto Sans disabled.");
+        Serial.println("[DISPLAY] LittleFS init failed, Noto Sans disabled.");
         Serial.println("[DISPLAY] Tip: upload filesystem image (PlatformIO target: uploadfs).");
         return false;
     }
 
-    Serial.printf("[DISPLAY] SPIFFS mounted. total=%u used=%u\n",
-                  static_cast<unsigned int>(SPIFFS.totalBytes()),
-                  static_cast<unsigned int>(SPIFFS.usedBytes()));
+    Serial.printf("[DISPLAY] LittleFS mounted. total=%u used=%u\n",
+                  static_cast<unsigned int>(LittleFS.totalBytes()),
+                  static_cast<unsigned int>(LittleFS.usedBytes()));
 
-    fs::File root = SPIFFS.open("/");
+    fs::File root = LittleFS.open("/");
     if (root)
     {
         fs::File file = root.openNextFile();
         while (file)
         {
-            Serial.printf("[DISPLAY] SPIFFS file: %s (%u bytes)\n",
+            Serial.printf("[DISPLAY] LittleFS file: %s (%u bytes)\n",
                           file.name(),
                           static_cast<unsigned int>(file.size()));
             file = root.openNextFile();
         }
     }
 
-    s_noto12Available = SPIFFS.exists("/NotoSansHU12.vlw");
-    s_noto16Available = SPIFFS.exists("/NotoSansHU16.vlw");
-    s_noto24Available = SPIFFS.exists("/NotoSansHU24.vlw");
-    s_noto32Available = SPIFFS.exists("/NotoSansHU32.vlw");
+    s_noto12Available = LittleFS.exists("/NotoSansHU12.vlw");
+    s_noto16Available = LittleFS.exists("/NotoSansHU16.vlw");
+    s_noto24Available = LittleFS.exists("/NotoSansHU24.vlw");
+    s_noto32Available = LittleFS.exists("/NotoSansHU32.vlw");
 
     if (!(s_noto12Available || s_noto16Available || s_noto24Available || s_noto32Available))
     {
@@ -184,7 +184,7 @@ static void drawStringUtf8(const char* text, int x, int y, int requestedPt = 16)
         const char* fontName = resolveNotoFontName(requestedPt);
         if (fontName != nullptr)
         {
-            g_epaper.loadFont(fontName, SPIFFS);
+            g_epaper.loadFont(fontName, LittleFS);
             g_epaper.drawString(text, x, y);
             g_epaper.unloadFont();
             return;

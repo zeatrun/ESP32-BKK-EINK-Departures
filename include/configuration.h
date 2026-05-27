@@ -103,6 +103,13 @@ private:
     void scheduleReboot(uint32_t delayMs);
     void renderConfigScreen();
     void setupWebServerRoutes();
+    void handleRootGet();
+    void handleCaptiveProbeGet();
+    void handleSavePost();
+    void handleRebootPost();
+    void handleRebootNowGet();
+    void handleApiSettingsGet();
+    void handleNotFound();
 };
 
 /** Global configuration instance, defined in configuration.cpp. */

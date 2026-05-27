@@ -43,6 +43,7 @@ It is designed for low-noise updates on e-paper and for robust operation with re
 - [src/departures.cpp](src/departures.cpp): global departures storage
 - [src/weather.cpp](src/weather.cpp): global weather storage
 - [include/settings_example.h](include/settings_example.h): configuration template
+- [data/config_page.html](data/config_page.html): config portal HTML template loaded from LittleFS
 - [script/settings_example.py](script/settings_example.py): configuration template for helper publisher scripts
 - [script/bkk_grabber.py](script/bkk_grabber.py): helper publisher for Hungarian public transport departures
 - [script/weather_grabber.py](script/weather_grabber.py): helper publisher for Open-Meteo weather
@@ -81,11 +82,12 @@ What happens in config mode:
 - the board starts a dedicated AP with generated SSID/password
 - a captive DNS server redirects common connectivity-check URLs to the local page
 - unknown HTTP paths are redirected to the config page
+- the config page is loaded from LittleFS file [data/config_page.html](data/config_page.html) as `/config_page.html`
 - the display shows configuration data and a Wi-Fi QR code for quick AP join
 
 Notes:
 - Captive portal behavior depends on client OS heuristics (Android/iOS/Windows), but direct open to `http://192.168.4.1` always works.
-- Settings are currently runtime-only; persistent save is scaffolded but not implemented yet.
+- Settings saved on the page are persisted to NVS and restored on next boot.
 
 ## Build and Flash
 
@@ -100,7 +102,7 @@ From project root:
 
 Or use the predefined PlatformIO tasks in VS Code.
 
-Filesystem (SPIFFS) commands:
+Filesystem (LittleFS) commands:
 
 1. Build filesystem image
 	 - platformio run --target buildfs
@@ -108,6 +110,10 @@ Filesystem (SPIFFS) commands:
 	 - platformio run --target uploadfs
 
 You only need filesystem upload when files under [data](data) change (fonts/images/web assets).
+
+Config portal web page in filesystem:
+- [data/config_page.html](data/config_page.html) is uploaded as `/config_page.html` and rendered by the web server
+- if this file is missing in LittleFS, a fallback error page is shown
 
 ## MQTT Topics and Payloads
 
@@ -211,7 +217,7 @@ This allows direct includes like:
 
 ## Custom Fonts (UTF-8 Hungarian)
 
-The display layer supports UTF-8 Hungarian text with custom Noto Sans smooth fonts loaded from SPIFFS.
+The display layer supports UTF-8 Hungarian text with custom Noto Sans smooth fonts loaded from LittleFS.
 
 ### Supported font files
 
@@ -237,18 +243,18 @@ Recommended settings for this project:
 
 ### Upload to device
 
-Filesystem type is configured as SPIFFS in [platformio.ini](platformio.ini).
+Filesystem type is configured as LittleFS in [platformio.ini](platformio.ini).
 
 From project root:
 
-1. Upload font files to SPIFFS
+1. Upload font files to LittleFS
 	- `platformio run -t uploadfs`
 2. Upload firmware
 	- `platformio run -t upload`
 
 ### Runtime behavior
 
-- If no Noto font files are found in SPIFFS, the firmware falls back to built-in fonts.
+- If no Noto font files are found in LittleFS, the firmware falls back to built-in fonts.
 - UTF-8 text rendering is enabled in display initialization.
 
 ## Troubleshooting
@@ -268,6 +274,9 @@ From project root:
 	- verify `.vlw` files exist in [data](data) and were uploaded with `uploadfs`
 	- if only code changed, `uploadfs` is not required
 	- if mount/files seem broken, run `buildfs` + `uploadfs` again
+- Config page shows "Configuration page missing":
+	- verify [data/config_page.html](data/config_page.html) exists
+	- run `buildfs` + `uploadfs` to refresh LittleFS contents
 
 ## License
 

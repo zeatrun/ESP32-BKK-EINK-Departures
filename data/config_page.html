@@ -1,0 +1,71 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset='utf-8'>
+  <meta name='viewport' content='width=device-width,initial-scale=1'>
+  <title>ESP32 Config</title>
+  <style>
+    body { font-family: Verdana, sans-serif; margin: 16px; background: #f8fafc; color: #111827; }
+    h1 { font-size: 1.2rem; margin: 0 0 10px 0; }
+    label { display: block; margin: 10px 0 4px; font-weight: 600; }
+    input, select { width: 100%; padding: 10px; border: 1px solid #cbd5e1; border-radius: 8px; box-sizing: border-box; }
+    .hint { font-size: .82rem; color: #475569; margin-top: 3px; }
+    button { margin-top: 14px; padding: 10px 14px; border: 0; border-radius: 8px; background: #0f766e; color: #fff; font-weight: 700; cursor: pointer; }
+    button.secondary { background: #b91c1c; }
+    .actions { display: flex; gap: 10px; flex-wrap: wrap; }
+    .card { max-width: 720px; margin: 0 auto; background: #fff; padding: 16px; border-radius: 12px; box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08); }
+    .meta { font-size: .9rem; color: #334155; margin-bottom: 10px; }
+  </style>
+</head>
+<body>
+  <div class='card'>
+    <h1>ESP32 Configuration</h1>
+    <div class='meta'>
+      AP SSID: <b>{{AP_SSID}}</b><br>
+      AP Password: <b>{{AP_PASSWORD}}</b>
+    </div>
+
+    <form method='post' action='/save'>
+      <label for='wifi_ssid'>WiFi SSID</label>
+      <input id='wifi_ssid' name='wifi_ssid' value='{{WIFI_SSID}}' required minlength='1' maxlength='63' autocomplete='off'>
+      <div class='hint'>1-63 characters</div>
+
+      <label for='wifi_password'>WiFi Password</label>
+      <input id='wifi_password' type='password' name='wifi_password' value='{{WIFI_PASSWORD}}' required minlength='8' maxlength='63' autocomplete='off'>
+      <div class='hint'>8-63 characters (WPA/WPA2)</div>
+
+      <label for='mqtt_server'>MQTT Server IP/Host</label>
+      <input id='mqtt_server' name='mqtt_server' value='{{MQTT_SERVER}}' required maxlength='63' pattern='[A-Za-z0-9.-]+' autocomplete='off'>
+      <div class='hint'>IPv4 or hostname</div>
+
+      <label for='mqtt_port'>MQTT Port</label>
+      <input id='mqtt_port' type='number' name='mqtt_port' value='{{MQTT_PORT}}' min='1' max='65535' required>
+
+      <label for='mqtt_departures_topic'>MQTT Departures Topic</label>
+      <input id='mqtt_departures_topic' name='mqtt_departures_topic' value='{{MQTT_DEPARTURES_TOPIC}}' required maxlength='127' autocomplete='off'>
+
+      <label for='mqtt_weather_topic'>MQTT Weather Topic</label>
+      <input id='mqtt_weather_topic' name='mqtt_weather_topic' value='{{MQTT_WEATHER_TOPIC}}' required maxlength='127' autocomplete='off'>
+
+      <label for='timezone'>Timezone</label>
+      <select id='timezone' name='timezone' required>
+        {{TIMEZONE_OPTIONS}}
+      </select>
+
+      <div class='actions'>
+        <button type='submit'>Save</button>
+      </div>
+    </form>
+
+    <div class='actions'>
+      <form method='post' action='/reboot'>
+        <button class='secondary' type='submit'>Reboot ESP</button>
+      </form>
+    </div>
+
+    <div class='hint'>
+      <a href='/reboot-now'>If reboot button does not work, click here.</a>
+    </div>
+  </div>
+</body>
+</html>

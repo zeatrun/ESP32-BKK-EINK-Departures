@@ -5,6 +5,8 @@
 #include <WebServer.h>
 #include <DNSServer.h>
 #include <Preferences.h>
+#include <LittleFS.h>
+#include <functional>
 
 // Pull compile-time defaults from settings.h (or the example fallback).
 #if __has_include("settings.h")
@@ -20,6 +22,7 @@ namespace
 {
 constexpr uint16_t CAPTIVE_DNS_PORT = 53;
 constexpr char CONFIG_PREF_NS[] = "cfg";
+constexpr char CONFIG_PAGE_FS_PATH[] = "/config_page.html";
 
 String trimCopy(const String& in)
 {
@@ -158,95 +161,84 @@ String htmlEscape(const char* input)
     return out;
 }
 
+bool ensureLittleFsMounted()
+{
+    static bool initAttempted = false;
+    static bool mounted = false;
+
+    if (initAttempted)
+    {
+        return mounted;
+    }
+
+    initAttempted = true;
+    mounted = LittleFS.begin(false);
+    if (mounted)
+    {
+        Serial.printf("[CONFIG] LittleFS mounted. total=%u used=%u\n",
+                      static_cast<unsigned int>(LittleFS.totalBytes()),
+                      static_cast<unsigned int>(LittleFS.usedBytes()));
+    }
+    else
+    {
+        Serial.println("[CONFIG] LittleFS mount failed.");
+    }
+
+    return mounted;
+}
+
+String loadConfigPageTemplateFromFs()
+{
+    if (!ensureLittleFsMounted())
+    {
+        return String();
+    }
+
+    File file = LittleFS.open(CONFIG_PAGE_FS_PATH, "r");
+    if (!file)
+    {
+        Serial.printf("[CONFIG] Missing HTML template in LittleFS: %s\n", CONFIG_PAGE_FS_PATH);
+        return String();
+    }
+
+    String html = file.readString();
+    file.close();
+    return html;
+}
+
 String buildConfigPage(const Configuration& cfg)
 {
-    String html;
-    html.reserve(9000);
-    html += F("<!doctype html><html><head><meta charset='utf-8'>");
-    html += F("<meta name='viewport' content='width=device-width,initial-scale=1'>");
-    html += F("<title>ESP32 Config</title>");
-    html += F("<style>body{font-family:Verdana,sans-serif;margin:16px;background:#f8fafc;color:#111827;}"
-              "h1{font-size:1.2rem;margin:0 0 10px 0;}label{display:block;margin:10px 0 4px;font-weight:600;}"
-              "input,select{width:100%;padding:10px;border:1px solid #cbd5e1;border-radius:8px;}"
-              ".hint{font-size:.82rem;color:#475569;margin-top:3px;}"
-              "button{margin-top:14px;padding:10px 14px;border:0;border-radius:8px;background:#0f766e;color:#fff;font-weight:700;}"
-              "button.secondary{background:#b91c1c;}"
-              ".actions{display:flex;gap:10px;flex-wrap:wrap;}"
-              ".card{max-width:720px;margin:0 auto;background:#fff;padding:16px;border-radius:12px;box-shadow:0 2px 10px rgba(0,0,0,0.08);position:relative;}"
-              ".meta{font-size:.9rem;color:#334155;margin-bottom:10px;}"
-              ".lang-switch{position:absolute;top:12px;right:12px;display:flex;align-items:center;gap:6px;}"
-              ".lang-switch button{margin-top:0;padding:4px 8px;font-size:.8rem;background:#e2e8f0;color:#0f172a;}"
-              ".lang-switch button.active{background:#0f766e;color:#fff;}</style></head><body>");
-    html += F("<div class='card'>");
-    html += F("<div class='lang-switch'><button type='button' id='lang-en'>EN</button><span>|</span><button type='button' id='lang-hu'>HU</button></div>");
-    html += F("<h1 id='title-main'>ESP32 Configuration</h1>");
-    html += F("<div class='meta'><span id='label-ap-ssid'>AP SSID:</span> <b>");
-    html += htmlEscape(cfg.configApSsid());
-    html += F("</b><br><span id='label-ap-password'>AP Password:</span> <b>");
-    html += htmlEscape(cfg.configApPassword());
-    html += F("</b></div>");
-    html += F("<form method='post' action='/save'>");
-    html += F("<input type='hidden' id='ui_lang_save' name='ui_lang' value='en'>");
-    html += F("<label id='label-wifi-ssid' for='wifi_ssid'>WiFi SSID</label><input id='wifi_ssid' name='wifi_ssid' value='");
-    html += htmlEscape(cfg.wifiSsid());
-    html += F("' required minlength='1' maxlength='63' autocomplete='off'>");
-    html += F("<div class='hint' id='hint-wifi-ssid'>1-63 characters</div>");
-    html += F("<label id='label-wifi-password' for='wifi_password'>WiFi Password</label><input id='wifi_password' type='password' name='wifi_password' value='");
-    html += htmlEscape(cfg.wifiPassword());
-    html += F("' required minlength='8' maxlength='63' autocomplete='off'>");
-    html += F("<div class='hint' id='hint-wifi-password'>8-63 characters (WPA/WPA2)</div>");
-    html += F("<label id='label-mqtt-server' for='mqtt_server'>MQTT Server IP/Host</label><input id='mqtt_server' name='mqtt_server' value='");
-    html += htmlEscape(cfg.mqttServer());
-    html += F("' required maxlength='63' pattern='[A-Za-z0-9.-]+' autocomplete='off'>");
-    html += F("<div class='hint' id='hint-mqtt-server'>IPv4 or hostname</div>");
-    html += F("<label id='label-mqtt-port' for='mqtt_port'>MQTT Port</label><input id='mqtt_port' type='number' name='mqtt_port' value='");
-    html += String(static_cast<unsigned int>(cfg.mqttPort()));
-    html += F("' min='1' max='65535' required>");
-    html += F("<label id='label-mqtt-departures-topic' for='mqtt_departures_topic'>MQTT Departures Topic</label><input id='mqtt_departures_topic' name='mqtt_departures_topic' value='");
-    html += htmlEscape(cfg.mqttTopicDepartures());
-    html += F("' required maxlength='127' autocomplete='off'>");
-    html += F("<label id='label-mqtt-weather-topic' for='mqtt_weather_topic'>MQTT Weather Topic</label><input id='mqtt_weather_topic' name='mqtt_weather_topic' value='");
-    html += htmlEscape(cfg.mqttTopicWeather());
-    html += F("' required maxlength='127' autocomplete='off'>");
-    html += F("<label id='label-timezone' for='timezone'>Timezone</label>");
-    html += F("<select id='timezone' name='timezone' required>");
+    String timezoneOptions;
+    timezoneOptions.reserve(1200);
     for (const auto& option : TIMEZONE_OPTIONS)
     {
-        html += F("<option value='");
-        html += htmlEscape(option.value);
-        html += F("' data-en='");
-        html += htmlEscape(option.labelEn);
-        html += F("' data-hu='");
-        html += htmlEscape(option.labelHu);
-        html += F("'");
+        timezoneOptions += F("<option value='");
+        timezoneOptions += htmlEscape(option.value);
+        timezoneOptions += F("'");
         if (strcmp(option.value, cfg.timezone()) == 0)
         {
-            html += F(" selected");
+            timezoneOptions += F(" selected");
         }
-        html += F("></option>");
+        timezoneOptions += F(">\n");
+        timezoneOptions += htmlEscape(option.labelEn);
+        timezoneOptions += F("</option>");
     }
-    html += F("</select>");
-    html += F("<div class='actions'>");
-    html += F("<button type='submit' id='btn-save'>Save</button>");
-    html += F("</div></form>");
-    html += F("<form method='post' action='/reboot' id='reboot-form'>");
-    html += F("<input type='hidden' id='ui_lang_reboot' name='ui_lang' value='en'>");
-    html += F("<div class='actions'><button class='secondary' type='submit' id='btn-reboot'>Reboot ESP</button></div>");
-    html += F("</form>");
-    html += F("</div>");
-    html += F("<script>(function(){"
-              "const dict={"
-              "en:{title:'ESP32 Configuration',apSsid:'AP SSID:',apPassword:'AP Password:',wifiSsid:'WiFi SSID',wifiSsidHint:'1-63 characters',wifiPassword:'WiFi Password',wifiPasswordHint:'8-63 characters (WPA/WPA2)',mqttServer:'MQTT Server IP/Host',mqttServerHint:'IPv4 or hostname',mqttPort:'MQTT Port',mqttDep:'MQTT Departures Topic',mqttWeather:'MQTT Weather Topic',timezone:'Timezone',save:'Save',reboot:'Reboot ESP',confirmReboot:'Restart ESP now?'},"
-              "hu:{title:'ESP32 Beállítás',apSsid:'AP SSID:',apPassword:'AP jelszó:',wifiSsid:'WiFi SSID',wifiSsidHint:'1-63 karakter',wifiPassword:'WiFi jelszó',wifiPasswordHint:'8-63 karakter (WPA/WPA2)',mqttServer:'MQTT szerver IP/host',mqttServerHint:'IPv4 cím vagy hostnév',mqttPort:'MQTT port',mqttDep:'MQTT indulások téma',mqttWeather:'MQTT időjárás téma',timezone:'Időzóna',save:'Mentés',reboot:'ESP újraindítása',confirmReboot:'Biztosan újraindítod az ESP-t?'}"
-              "};"
-              "const nodes={title:document.getElementById('title-main'),apSsid:document.getElementById('label-ap-ssid'),apPassword:document.getElementById('label-ap-password'),wifiSsid:document.getElementById('label-wifi-ssid'),wifiSsidHint:document.getElementById('hint-wifi-ssid'),wifiPassword:document.getElementById('label-wifi-password'),wifiPasswordHint:document.getElementById('hint-wifi-password'),mqttServer:document.getElementById('label-mqtt-server'),mqttServerHint:document.getElementById('hint-mqtt-server'),mqttPort:document.getElementById('label-mqtt-port'),mqttDep:document.getElementById('label-mqtt-departures-topic'),mqttWeather:document.getElementById('label-mqtt-weather-topic'),timezone:document.getElementById('label-timezone'),save:document.getElementById('btn-save'),reboot:document.getElementById('btn-reboot')};"
-              "const enBtn=document.getElementById('lang-en');const huBtn=document.getElementById('lang-hu');const rebootForm=document.getElementById('reboot-form');const langSave=document.getElementById('ui_lang_save');const langReboot=document.getElementById('ui_lang_reboot');"
-              "function setLang(lang){const t=dict[lang]||dict.en;Object.keys(nodes).forEach(k=>{if(nodes[k])nodes[k].textContent=t[k];});const tzSel=document.getElementById('timezone');if(tzSel){Array.from(tzSel.options).forEach(o=>{const key=(lang==='hu'?'hu':'en');o.textContent=o.dataset[key]||o.value;});}if(rebootForm)rebootForm.dataset.confirm=t.confirmReboot;if(langSave)langSave.value=lang;if(langReboot)langReboot.value=lang;enBtn.classList.toggle('active',lang==='en');huBtn.classList.toggle('active',lang==='hu');try{localStorage.setItem('cfg_lang',lang);}catch(e){}}"
-              "if(enBtn)enBtn.addEventListener('click',()=>setLang('en'));if(huBtn)huBtn.addEventListener('click',()=>setLang('hu'));"
-              "if(rebootForm)rebootForm.addEventListener('submit',function(ev){const msg=this.dataset.confirm||'Restart ESP now?';if(!confirm(msg)){ev.preventDefault();}});"
-              "let initial='en';try{initial=localStorage.getItem('cfg_lang')||'';}catch(e){}if(initial!=='en'&&initial!=='hu'){const n=(navigator.language||'en').toLowerCase();initial=n.startsWith('hu')?'hu':'en';}setLang(initial);"
-              "})();</script>");
-    html += F("</body></html>");
+
+    String html = loadConfigPageTemplateFromFs();
+    if (html.isEmpty())
+    {
+        return F("<!doctype html><html><body style='font-family:Verdana,sans-serif;margin:16px'><h2>Configuration page missing</h2><p>Upload filesystem image and ensure /config_page.html is present.</p></body></html>");
+    }
+
+    html.replace("{{AP_SSID}}", htmlEscape(cfg.configApSsid()));
+    html.replace("{{AP_PASSWORD}}", htmlEscape(cfg.configApPassword()));
+    html.replace("{{WIFI_SSID}}", htmlEscape(cfg.wifiSsid()));
+    html.replace("{{WIFI_PASSWORD}}", htmlEscape(cfg.wifiPassword()));
+    html.replace("{{MQTT_SERVER}}", htmlEscape(cfg.mqttServer()));
+    html.replace("{{MQTT_PORT}}", String(static_cast<unsigned int>(cfg.mqttPort())));
+    html.replace("{{MQTT_DEPARTURES_TOPIC}}", htmlEscape(cfg.mqttTopicDepartures()));
+    html.replace("{{MQTT_WEATHER_TOPIC}}", htmlEscape(cfg.mqttTopicWeather()));
+    html.replace("{{TIMEZONE_OPTIONS}}", timezoneOptions);
     return html;
 }
 
@@ -266,6 +258,47 @@ void sendPortalRedirect(WebServer& server)
 {
     server.sendHeader("Location", "/", true);
     server.send(302, "text/plain", "Redirecting to portal");
+}
+
+const char* httpMethodToString(HTTPMethod method)
+{
+    switch (method)
+    {
+        case HTTP_GET: return "GET";
+        case HTTP_POST: return "POST";
+        case HTTP_PUT: return "PUT";
+        case HTTP_PATCH: return "PATCH";
+        case HTTP_DELETE: return "DELETE";
+        case HTTP_OPTIONS: return "OPTIONS";
+        case HTTP_HEAD: return "HEAD";
+        default: return "OTHER";
+    }
+}
+
+void logWebRequest(WebServer& server, const char* handlerName)
+{
+    Serial.printf("[CONFIG][WEB] %s %s -> %s\n",
+                  httpMethodToString(server.method()),
+                  server.uri().c_str(),
+                  handlerName);
+}
+
+void sendRebootResponse(WebServer& server, bool isHu)
+{
+    if (isHu)
+    {
+        server.send(200,
+                    "text/html",
+                    "<!doctype html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>Ujrainditas</title></head>"
+                    "<body style='font-family:Verdana,sans-serif;margin:16px'><h2>ESP ujrainditas...</h2><p>Par masodperc mulva toltsd ujra az oldalt.</p></body></html>");
+    }
+    else
+    {
+        server.send(200,
+                    "text/html",
+                    "<!doctype html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>Reboot</title></head>"
+                    "<body style='font-family:Verdana,sans-serif;margin:16px'><h2>ESP rebooting...</h2><p>Reload this page in a few seconds.</p></body></html>");
+    }
 }
 }
 
@@ -564,146 +597,211 @@ void Configuration::setupWebServerRoutes()
         return;
     }
 
-    m_webServer->on("/", HTTP_GET, [this]() {
-        m_webServer->send(200, "text/html", buildConfigPage(*this));
-    });
+    m_webServer->on("/", HTTP_GET, std::bind(&Configuration::handleRootGet, this));
 
     // Common captive portal probes across major clients.
-    m_webServer->on("/generate_204", HTTP_GET, [this]() { sendPortalRedirect(*m_webServer); });
-    m_webServer->on("/gen_204", HTTP_GET, [this]() { sendPortalRedirect(*m_webServer); });
-    m_webServer->on("/hotspot-detect.html", HTTP_GET, [this]() { sendPortalRedirect(*m_webServer); });
-    m_webServer->on("/ncsi.txt", HTTP_GET, [this]() { sendPortalRedirect(*m_webServer); });
-    m_webServer->on("/connecttest.txt", HTTP_GET, [this]() { sendPortalRedirect(*m_webServer); });
-    m_webServer->on("/redirect", HTTP_GET, [this]() { sendPortalRedirect(*m_webServer); });
+    m_webServer->on("/generate_204", HTTP_GET, std::bind(&Configuration::handleCaptiveProbeGet, this));
+    m_webServer->on("/gen_204", HTTP_GET, std::bind(&Configuration::handleCaptiveProbeGet, this));
+    m_webServer->on("/hotspot-detect.html", HTTP_GET, std::bind(&Configuration::handleCaptiveProbeGet, this));
+    m_webServer->on("/ncsi.txt", HTTP_GET, std::bind(&Configuration::handleCaptiveProbeGet, this));
+    m_webServer->on("/connecttest.txt", HTTP_GET, std::bind(&Configuration::handleCaptiveProbeGet, this));
+    m_webServer->on("/redirect", HTTP_GET, std::bind(&Configuration::handleCaptiveProbeGet, this));
 
-    m_webServer->on("/save", HTTP_POST, [this]() {
-        if (!(m_webServer->hasArg("wifi_ssid") &&
-              m_webServer->hasArg("wifi_password") &&
-              m_webServer->hasArg("mqtt_server") &&
-              m_webServer->hasArg("mqtt_port") &&
-              m_webServer->hasArg("mqtt_departures_topic") &&
-              m_webServer->hasArg("mqtt_weather_topic") &&
-              m_webServer->hasArg("timezone")))
-        {
-            sendValidationError(*m_webServer, "Missing required fields.");
-            return;
-        }
+    m_webServer->on("/save", HTTP_POST, std::bind(&Configuration::handleSavePost, this));
+    m_webServer->on("/reboot", HTTP_POST, std::bind(&Configuration::handleRebootPost, this));
+    m_webServer->on("/reboot-now", HTTP_GET, std::bind(&Configuration::handleRebootNowGet, this));
+    m_webServer->on("/api/settings", HTTP_GET, std::bind(&Configuration::handleApiSettingsGet, this));
 
-        const String wifiSsid = trimCopy(m_webServer->arg("wifi_ssid"));
-        const String wifiPassword = trimCopy(m_webServer->arg("wifi_password"));
-        const String mqttServer = trimCopy(m_webServer->arg("mqtt_server"));
-        const String mqttPortText = trimCopy(m_webServer->arg("mqtt_port"));
-        const String depTopic = trimCopy(m_webServer->arg("mqtt_departures_topic"));
-        const String weatherTopic = trimCopy(m_webServer->arg("mqtt_weather_topic"));
-        const String timezone = trimCopy(m_webServer->arg("timezone"));
+    m_webServer->onNotFound(std::bind(&Configuration::handleNotFound, this));
+}
 
-        if (wifiSsid.isEmpty() || wifiSsid.length() > (sizeof(m_wifiSsid) - 1) || !isAsciiPrintableNoCtrl(wifiSsid))
-        {
-            sendValidationError(*m_webServer, "Invalid WiFi SSID (1-63 printable ASCII chars).");
-            return;
-        }
+void Configuration::handleRootGet()
+{
+    if (m_webServer == nullptr)
+    {
+        return;
+    }
 
-        if (wifiPassword.length() < 8 || wifiPassword.length() > (sizeof(m_wifiPassword) - 1) || !isAsciiPrintableNoCtrl(wifiPassword))
-        {
-            sendValidationError(*m_webServer, "Invalid WiFi password (8-63 printable ASCII chars).");
-            return;
-        }
+    logWebRequest(*m_webServer, "handleRootGet");
+    m_webServer->send(200, "text/html", buildConfigPage(*this));
+}
 
-        if (!isValidHostOrIpv4(mqttServer))
-        {
-            sendValidationError(*m_webServer, "Invalid MQTT server host/IP.");
-            return;
-        }
+void Configuration::handleCaptiveProbeGet()
+{
+    if (m_webServer == nullptr)
+    {
+        return;
+    }
 
-        const long port = mqttPortText.toInt();
-        if (port <= 0 || port > 65535)
-        {
-            sendValidationError(*m_webServer, "Invalid MQTT port (1-65535).");
-            return;
-        }
+    logWebRequest(*m_webServer, "handleCaptiveProbeGet");
+    sendPortalRedirect(*m_webServer);
+}
 
-        if (!isValidMqttTopic(depTopic))
-        {
-            sendValidationError(*m_webServer, "Invalid departures MQTT topic.");
-            return;
-        }
+void Configuration::handleSavePost()
+{
+    if (m_webServer == nullptr)
+    {
+        return;
+    }
 
-        if (!isValidMqttTopic(weatherTopic))
-        {
-            sendValidationError(*m_webServer, "Invalid weather MQTT topic.");
-            return;
-        }
+    logWebRequest(*m_webServer, "handleSavePost");
 
-        if (!isAllowedTimezoneValue(timezone))
-        {
-            sendValidationError(*m_webServer, "Invalid timezone selection.");
-            return;
-        }
+    if (!(m_webServer->hasArg("wifi_ssid") &&
+          m_webServer->hasArg("wifi_password") &&
+          m_webServer->hasArg("mqtt_server") &&
+          m_webServer->hasArg("mqtt_port") &&
+          m_webServer->hasArg("mqtt_departures_topic") &&
+          m_webServer->hasArg("mqtt_weather_topic") &&
+          m_webServer->hasArg("timezone")))
+    {
+        sendValidationError(*m_webServer, "Missing required fields.");
+        return;
+    }
 
-        setWifiSsid(wifiSsid.c_str());
-        setWifiPassword(wifiPassword.c_str());
-        setMqttServer(mqttServer.c_str());
-        setMqttPort(static_cast<uint16_t>(port));
-        setMqttTopicDepartures(depTopic.c_str());
-        setMqttTopicWeather(weatherTopic.c_str());
-        setTimezone(timezone.c_str());
+    const String wifiSsid = trimCopy(m_webServer->arg("wifi_ssid"));
+    const String wifiPassword = trimCopy(m_webServer->arg("wifi_password"));
+    const String mqttServer = trimCopy(m_webServer->arg("mqtt_server"));
+    const String mqttPortText = trimCopy(m_webServer->arg("mqtt_port"));
+    const String depTopic = trimCopy(m_webServer->arg("mqtt_departures_topic"));
+    const String weatherTopic = trimCopy(m_webServer->arg("mqtt_weather_topic"));
+    const String timezone = trimCopy(m_webServer->arg("timezone"));
 
-        save();
-        renderConfigScreen();
+    if (wifiSsid.isEmpty() || wifiSsid.length() > (sizeof(m_wifiSsid) - 1) || !isAsciiPrintableNoCtrl(wifiSsid))
+    {
+        sendValidationError(*m_webServer, "Invalid WiFi SSID (1-63 printable ASCII chars).");
+        return;
+    }
 
-        m_webServer->sendHeader("Location", "/", true);
-        m_webServer->send(303, "text/plain", "Saved");
-    });
+    if (wifiPassword.length() < 8 || wifiPassword.length() > (sizeof(m_wifiPassword) - 1) || !isAsciiPrintableNoCtrl(wifiPassword))
+    {
+        sendValidationError(*m_webServer, "Invalid WiFi password (8-63 printable ASCII chars).");
+        return;
+    }
 
-    m_webServer->on("/reboot", HTTP_POST, [this]() {
-        const String uiLang = m_webServer->hasArg("ui_lang") ? m_webServer->arg("ui_lang") : "en";
-        const bool isHu = uiLang.equalsIgnoreCase("hu");
+    if (!isValidHostOrIpv4(mqttServer))
+    {
+        sendValidationError(*m_webServer, "Invalid MQTT server host/IP.");
+        return;
+    }
 
-        if (isHu)
-        {
-            m_webServer->send(200,
-                              "text/html",
-                              "<!doctype html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>Ujrainditas</title></head>"
-                              "<body style='font-family:Verdana,sans-serif;margin:16px'><h2>ESP ujrainditas...</h2><p>Par masodperc mulva toltsd ujra az oldalt.</p></body></html>");
-        }
-        else
-        {
-            m_webServer->send(200,
-                              "text/html",
-                              "<!doctype html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>Reboot</title></head>"
-                              "<body style='font-family:Verdana,sans-serif;margin:16px'><h2>ESP rebooting...</h2><p>Reload this page in a few seconds.</p></body></html>");
-        }
+    const long port = mqttPortText.toInt();
+    if (port <= 0 || port > 65535)
+    {
+        sendValidationError(*m_webServer, "Invalid MQTT port (1-65535).");
+        return;
+    }
 
-        scheduleReboot(1200);
-    });
+    if (!isValidMqttTopic(depTopic))
+    {
+        sendValidationError(*m_webServer, "Invalid departures MQTT topic.");
+        return;
+    }
 
-    m_webServer->on("/api/settings", HTTP_GET, [this]() {
-        String json;
-        json.reserve(512);
-        json += "{";
-        json += "\"wifiSsid\":\"";
-        json += wifiSsid();
-        json += "\",";
-        json += "\"mqttServer\":\"";
-        json += mqttServer();
-        json += "\",";
-        json += "\"mqttPort\":";
-        json += String(static_cast<unsigned int>(mqttPort()));
-        json += ",";
-        json += "\"mqttDeparturesTopic\":\"";
-        json += mqttTopicDepartures();
-        json += "\",";
-        json += "\"mqttWeatherTopic\":\"";
-        json += mqttTopicWeather();
-        json += "\",";
-        json += "\"timezone\":\"";
-        json += timezone();
-        json += "\"";
-        json += "}";
-        m_webServer->send(200, "application/json", json);
-    });
+    if (!isValidMqttTopic(weatherTopic))
+    {
+        sendValidationError(*m_webServer, "Invalid weather MQTT topic.");
+        return;
+    }
 
-    m_webServer->onNotFound([this]() {
-        sendPortalRedirect(*m_webServer);
-    });
+    if (!isAllowedTimezoneValue(timezone))
+    {
+        sendValidationError(*m_webServer, "Invalid timezone selection.");
+        return;
+    }
+
+    setWifiSsid(wifiSsid.c_str());
+    setWifiPassword(wifiPassword.c_str());
+    setMqttServer(mqttServer.c_str());
+    setMqttPort(static_cast<uint16_t>(port));
+    setMqttTopicDepartures(depTopic.c_str());
+    setMqttTopicWeather(weatherTopic.c_str());
+    setTimezone(timezone.c_str());
+
+    save();
+    renderConfigScreen();
+
+    m_webServer->sendHeader("Location", "/", true);
+    m_webServer->send(303, "text/plain", "Saved");
+}
+
+void Configuration::handleRebootPost()
+{
+    if (m_webServer == nullptr)
+    {
+        return;
+    }
+
+    logWebRequest(*m_webServer, "handleRebootPost");
+    Serial.println("[CONFIG] /reboot requested (POST).");
+
+    const String uiLang = m_webServer->hasArg("ui_lang") ? m_webServer->arg("ui_lang") : "en";
+    const bool isHu = uiLang.equalsIgnoreCase("hu");
+
+    sendRebootResponse(*m_webServer, isHu);
+
+    delay(350);
+    ESP.restart();
+}
+
+void Configuration::handleRebootNowGet()
+{
+    if (m_webServer == nullptr)
+    {
+        return;
+    }
+
+    logWebRequest(*m_webServer, "handleRebootNowGet");
+    Serial.println("[CONFIG] /reboot-now requested (GET fallback).");
+    const String uiLang = m_webServer->hasArg("ui_lang") ? m_webServer->arg("ui_lang") : "en";
+    const bool isHu = uiLang.equalsIgnoreCase("hu");
+
+    sendRebootResponse(*m_webServer, isHu);
+
+    delay(350);
+    ESP.restart();
+}
+
+void Configuration::handleApiSettingsGet()
+{
+    if (m_webServer == nullptr)
+    {
+        return;
+    }
+
+    logWebRequest(*m_webServer, "handleApiSettingsGet");
+
+    String json;
+    json.reserve(512);
+    json += "{";
+    json += "\"wifiSsid\":\"";
+    json += wifiSsid();
+    json += "\",";
+    json += "\"mqttServer\":\"";
+    json += mqttServer();
+    json += "\",";
+    json += "\"mqttPort\":";
+    json += String(static_cast<unsigned int>(mqttPort()));
+    json += ",";
+    json += "\"mqttDeparturesTopic\":\"";
+    json += mqttTopicDepartures();
+    json += "\",";
+    json += "\"mqttWeatherTopic\":\"";
+    json += mqttTopicWeather();
+    json += "\",";
+    json += "\"timezone\":\"";
+    json += timezone();
+    json += "\"";
+    json += "}";
+    m_webServer->send(200, "application/json", json);
+}
+
+void Configuration::handleNotFound()
+{
+    if (m_webServer == nullptr)
+    {
+        return;
+    }
+
+    logWebRequest(*m_webServer, "handleNotFound");
+    sendPortalRedirect(*m_webServer);
 }
