@@ -43,6 +43,7 @@ It is designed for low-noise updates on e-paper and for robust operation with re
 - [src/departures.cpp](src/departures.cpp): global departures storage
 - [src/weather.cpp](src/weather.cpp): global weather storage
 - [include/settings_example.h](include/settings_example.h): configuration template
+- [script/settings_example.py](script/settings_example.py): configuration template for helper publisher scripts
 - [script/bkk_grabber.py](script/bkk_grabber.py): helper publisher for Hungarian public transport departures
 - [script/weather_grabber.py](script/weather_grabber.py): helper publisher for Open-Meteo weather
 - [gen](gen): generated image headers (included via compiler include path)
@@ -60,6 +61,13 @@ It is designed for low-noise updates on e-paper and for robust operation with re
 2. Verify serial/upload ports in [platformio.ini](platformio.ini):
 - upload_port
 - monitor_port
+
+3. Configure helper Python scripts:
+- copy [script/settings_example.py](script/settings_example.py) to [script/settings.py](script/settings.py)
+- set your real values for:
+	- MQTT broker IP/port
+	- location (city or latitude/longitude)
+	- BKK API key
 
 ## Config Mode (AP + Captive Portal)
 
@@ -178,7 +186,7 @@ Defined in [include/display_manager.h](include/display_manager.h):
 [script/bkk_grabber.py](script/bkk_grabber.py) fetches departures from BKK API and publishes to MQTT.
 
 Notes:
-- contains API key and broker values as in-file constants
+- uses values from [script/settings.py](script/settings.py)
 - publishes retained payloads
 
 ### Weather publisher
@@ -187,6 +195,7 @@ Notes:
 
 Notes:
 - supports city lookup mode and fixed coordinate mode
+- uses values from [script/settings.py](script/settings.py)
 - publishes retained payloads
 - refresh interval is configurable in script constants
 
