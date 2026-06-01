@@ -23,6 +23,18 @@ namespace
 constexpr uint16_t CAPTIVE_DNS_PORT = 53;
 constexpr char CONFIG_PREF_NS[] = "cfg";
 constexpr char CONFIG_PAGE_FS_PATH[] = "/config_page.html";
+constexpr bool DUMMY_DEFAULT_USE_MQTT = true;
+
+Configuration::DataSourceMode dataSourceModeFromStoredBool(bool useMqtt)
+{
+    return useMqtt ? Configuration::DataSourceMode::Mqtt
+                   : Configuration::DataSourceMode::DirectApi;
+}
+
+const char* dataSourceModeToString(Configuration::DataSourceMode mode)
+{
+    return (mode == Configuration::DataSourceMode::Mqtt) ? "mqtt" : "direct_api";
+}
 
 String trimCopy(const String& in)
 {
@@ -330,6 +342,7 @@ void Configuration::load()
     const String depTopic = prefs.getString("mqtt_dep", m_mqttTopicDepartures);
     const String weatherTopic = prefs.getString("mqtt_wth", m_mqttTopicWeather);
     const String timezone = prefs.getString("tz", m_timezone);
+    const bool useMqttDataSource = prefs.getBool("use_mqtt", DUMMY_DEFAULT_USE_MQTT);
     prefs.end();
 
     strlcpy(m_wifiSsid, wifiSsid.c_str(), sizeof(m_wifiSsid));
@@ -339,16 +352,18 @@ void Configuration::load()
     strlcpy(m_mqttTopicDepartures, depTopic.c_str(), sizeof(m_mqttTopicDepartures));
     strlcpy(m_mqttTopicWeather, weatherTopic.c_str(), sizeof(m_mqttTopicWeather));
     strlcpy(m_timezone, timezone.c_str(), sizeof(m_timezone));
+    m_dataSourceMode = dataSourceModeFromStoredBool(useMqttDataSource);
 
     Serial.println("[CONFIG] Configuration loaded from NVS.");
-    Serial.printf("[CONFIG] Loaded values: wifiSsid='%s' wifiPassword='%s' mqttServer='%s' mqttPort=%u depTopic='%s' weatherTopic='%s' tz='%s'\n",
+    Serial.printf("[CONFIG] Loaded values: wifiSsid='%s' wifiPassword='%s' mqttServer='%s' mqttPort=%u depTopic='%s' weatherTopic='%s' tz='%s' dataSource='%s'\n",
                   m_wifiSsid,
                   m_wifiPassword,
                   m_mqttServer,
                   static_cast<unsigned int>(m_mqttPort),
                   m_mqttTopicDepartures,
                   m_mqttTopicWeather,
-                  m_timezone);
+                  m_timezone,
+                  dataSourceModeToString(m_dataSourceMode));
 }
 
 void Configuration::loadDefaults()
@@ -359,6 +374,7 @@ void Configuration::loadDefaults()
     m_mqttPort = SETTINGS_MQTT_PORT;
     strlcpy(m_mqttTopicDepartures,    SETTINGS_MQTT_TOPIC_DEPARTURES,  sizeof(m_mqttTopicDepartures));
     strlcpy(m_mqttTopicWeather,       SETTINGS_MQTT_TOPIC_WEATHER,     sizeof(m_mqttTopicWeather));
+    m_dataSourceMode = dataSourceModeFromStoredBool(DUMMY_DEFAULT_USE_MQTT);
     // Timezone default is already set by the member initialiser; do not overwrite
     // unless a stored setting is available in the future.
 }
@@ -379,6 +395,7 @@ void Configuration::save()
     prefs.putString("mqtt_dep", m_mqttTopicDepartures);
     prefs.putString("mqtt_wth", m_mqttTopicWeather);
     prefs.putString("tz", m_timezone);
+    prefs.putBool("use_mqtt", m_dataSourceMode == DataSourceMode::Mqtt);
     prefs.putBool("has", true);
     prefs.end();
 
@@ -552,6 +569,11 @@ void Configuration::setTimezone(const char* tz)
     {
         strlcpy(m_timezone, tz, sizeof(m_timezone));
     }
+}
+
+void Configuration::setDataSourceMode(DataSourceMode mode)
+{
+    m_dataSourceMode = mode;
 }
 
 void Configuration::generateConfigApCredentials()
@@ -790,6 +812,9 @@ void Configuration::handleApiSettingsGet()
     json += "\",";
     json += "\"timezone\":\"";
     json += timezone();
+    json += "\",";
+    json += "\"dataSource\":\"";
+    json += dataSourceModeToString(dataSourceMode());
     json += "\"";
     json += "}";
     m_webServer->send(200, "application/json", json);

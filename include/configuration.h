@@ -19,6 +19,12 @@ class DNSServer;
 class Configuration
 {
 public:
+    enum class DataSourceMode : uint8_t
+    {
+        Mqtt = 0,
+        DirectApi = 1,
+    };
+
     Configuration() = default;
 
     // ── Lifecycle ─────────────────────────────────────────────────────────────
@@ -60,6 +66,8 @@ public:
 
     const char* mqttTopicDepartures() const { return m_mqttTopicDepartures; }
     const char* mqttTopicWeather()    const { return m_mqttTopicWeather; }
+    DataSourceMode dataSourceMode() const { return m_dataSourceMode; }
+    bool useMqttDataSource() const { return m_dataSourceMode == DataSourceMode::Mqtt; }
 
     /**
      * POSIX timezone string, e.g. "CET-1CEST,M3.5.0,M10.5.0/3" for Budapest.
@@ -78,6 +86,7 @@ public:
     void setMqttTopicDepartures(const char* topic);
     void setMqttTopicWeather(const char* topic);
     void setTimezone(const char* tz);
+    void setDataSourceMode(DataSourceMode mode);
 
 private:
     char     m_wifiSsid[64]               = {};
@@ -86,6 +95,7 @@ private:
     uint16_t m_mqttPort                   = 1883;
     char     m_mqttTopicDepartures[128]   = {};
     char     m_mqttTopicWeather[128]      = {};
+    DataSourceMode m_dataSourceMode       = DataSourceMode::Mqtt;
     // POSIX TZ string — default: Central European Time with automatic DST.
     char     m_timezone[64]               = "CET-1CEST,M3.5.0,M10.5.0/3";
 

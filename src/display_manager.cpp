@@ -4,7 +4,7 @@
 
 #include "driver.h"
 #include "TFT_eSPI.h"
-#include "mqtt_manager.h"
+#include "data_source_manager.h"
 #include "weather.h"
 #include <qrcode.h>
 
@@ -181,7 +181,7 @@ static void drawTopRightStatus()
     struct tm updateTime = {};
     char mqttTimeStr[6] = "xx:xx";
 
-    if (mqttManagerGetLastUpdateTime(&updateTime))
+    if (dataSourceManagerGetLastUpdateTime(&updateTime))
     {
         snprintf(mqttTimeStr, sizeof(mqttTimeStr), "%02d:%02d", updateTime.tm_hour, updateTime.tm_min);
     }
@@ -191,7 +191,7 @@ static void drawTopRightStatus()
     g_epaper.setTextColor(EINK_BLACK, EINK_WHITE, true);
     g_epaper.drawString(mqttTimeStr, mqttTimeX, mqttTimeY);
 
-    const uint16_t dotColor = mqttManagerIsConnected() ? EINK_GREEN : EINK_RED;
+    const uint16_t dotColor = dataSourceManagerIsConnected() ? EINK_GREEN : EINK_RED;
     g_epaper.fillCircle(dotX, dotY, dotRadius, dotColor);
     g_epaper.drawCircle(dotX, dotY, dotRadius, EINK_BLACK);
 }

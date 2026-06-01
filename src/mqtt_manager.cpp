@@ -18,6 +18,8 @@ static time_t             s_lastUpdateTs   = 0;
 static bool               s_seenDeparturePayload = false;
 static bool               s_seenWeatherPayload   = false;
 static bool               s_reportedInitIssue    = false;
+static char               s_departuresTopic[128] = {};
+static char               s_weatherTopic[128]    = {};
 
 constexpr float WEATHER_FLOAT_EPSILON = 0.01F;
 
@@ -55,12 +57,12 @@ static MqttPayloadType getPayloadType(const char* topic)
         return MqttPayloadType::Unknown;
     }
 
-    if (strcmp(topic, MQTT_SUB_TOPIC) == 0)
+    if (strcmp(topic, s_departuresTopic) == 0)
     {
         return MqttPayloadType::Departures;
     }
 
-    if (strcmp(topic, MQTT_WEATHER_TOPIC) == 0)
+    if (strcmp(topic, s_weatherTopic) == 0)
     {
         return MqttPayloadType::Weather;
     }
@@ -396,8 +398,8 @@ static bool mqttConnect()
     if (s_mqttClient->connect(clientId.c_str()))
     {
         Serial.println("connected.");
-        s_mqttClient->subscribe(MQTT_SUB_TOPIC);
-        s_mqttClient->subscribe(MQTT_WEATHER_TOPIC);
+        s_mqttClient->subscribe(s_departuresTopic);
+        s_mqttClient->subscribe(s_weatherTopic);
         setMqttConnected(true);
         return true;
     }
@@ -513,18 +515,39 @@ bool mqttManagerGetLastUpdateTime(struct tm* outTime)
 
 void mqttManagerInit(EventGroupHandle_t connectedEventGroup,
                      WiFiClient&        espClient,
-                     SemaphoreHandle_t  clientMutex)
+                     SemaphoreHandle_t  clientMutex,
+                     const MqttRuntimeConfig& config)
 {
     s_wifiEventGroup = connectedEventGroup;
     s_clientMutex    = clientMutex;
 
+    const char* server = (config.server != nullptr && config.server[0] != '\0')
+                         ? config.server
+                         : "127.0.0.1";
+    const uint16_t port = (config.port == 0U) ? 1883U : config.port;
+    const char* departuresTopic = (config.departuresTopic != nullptr && config.departuresTopic[0] != '\0')
+                                  ? config.departuresTopic
+                                  : "bkk/stop";
+    const char* weatherTopic = (config.weatherTopic != nullptr && config.weatherTopic[0] != '\0')
+                               ? config.weatherTopic
+                               : "weather/forecast";
+
+    strlcpy(s_departuresTopic, departuresTopic, sizeof(s_departuresTopic));
+    strlcpy(s_weatherTopic, weatherTopic, sizeof(s_weatherTopic));
+
     // PubSubClient is allocated once here; it will live for the lifetime of the program
     static PubSubClient mqttClient(espClient);
-    mqttClient.setServer(MQTT_SERVER, MQTT_PORT);
+    mqttClient.setServer(server, port);
     mqttClient.setBufferSize(MQTT_BUFFER_SIZE);
     mqttClient.setSocketTimeout(2);
     mqttClient.setCallback(mqttCallback);
     s_mqttClient = &mqttClient;
+
+    Serial.printf("[MQTT] Runtime config: server=%s port=%u depTopic=%s weatherTopic=%s\n",
+                  server,
+                  static_cast<unsigned int>(port),
+                  s_departuresTopic,
+                  s_weatherTopic);
 }
 
 void mqttTaskStart()
