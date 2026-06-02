@@ -39,6 +39,11 @@ bool departureEquals(const Departure& a, const Departure& b)
         && a.timestamp == b.timestamp;
 }
 
+bool isBkkStopId(const char* stopId)
+{
+    return stopId != nullptr && strncmp(stopId, "BKK_", 4) == 0;
+}
+
 bool departuresEqual(const Departure* a, int aCount, const Departure* b, int bCount)
 {
     if (aCount != bCount)
@@ -339,6 +344,11 @@ void dataSourceManagerInit(EventGroupHandle_t connectedEventGroup,
                   g_config.busStopId(),
                   g_config.trainStopId());
 
+    if (g_config.useDeparturesMqtt())
+    {
+        Serial.println("[DATA][INIT] Departures source is MQTT, BKK DirectAPI provider is disabled");
+    }
+
     // If weather and/or departures use MQTT, init MQTT manager
     if (g_config.useWeatherMqtt() || g_config.useDeparturesMqtt())
     {
@@ -400,9 +410,38 @@ void dataSourceManagerInit(EventGroupHandle_t connectedEventGroup,
         DeparturesProvider* departuresProvider = nullptr;
         if (g_config.departuresApiProvider() == Configuration::DeparturesApiProvider::Bkk)
         {
-            // Use busStopId if available, otherwise fall back to trainStopId
-            // TODO: In future, BkkDeparturesProvider should accept separate bus/train stop IDs
-            const char* stopId = g_config.busStopId()[0] != '\0' ? g_config.busStopId() : g_config.trainStopId();
+            // Select a BKK-compatible stop ID with preference order:
+            // 1) bus stop if it starts with BKK_
+            // 2) train stop if it starts with BKK_
+            // 3) non-empty bus stop
+            // 4) non-empty train stop
+            const char* busStop = g_config.busStopId();
+            const char* trainStop = g_config.trainStopId();
+            const char* stopId = "";
+
+            if (isBkkStopId(busStop))
+            {
+                stopId = busStop;
+            }
+            else if (isBkkStopId(trainStop))
+            {
+                stopId = trainStop;
+            }
+            else if (busStop[0] != '\0')
+            {
+                stopId = busStop;
+            }
+            else
+            {
+                stopId = trainStop;
+            }
+
+            if (!isBkkStopId(stopId))
+            {
+                Serial.printf("[DATA][INIT] Warning: selected stop '%s' does not look like a BKK stop ID (expected prefix: BKK_)\n",
+                              stopId);
+            }
+
             Serial.printf("[DATA][INIT] BKK stop selected='%s' (bus='%s' train='%s')\n",
                           stopId,
                           g_config.busStopId(),

@@ -161,6 +161,10 @@ bool BkkDeparturesProvider::parseBkkResponse(
 
         JsonObject trip = trips[tripId];
         const char* routeId = trip["routeId"];
+        if (!routeId)
+        {
+            continue;
+        }
         JsonObject route = routes[routeId];
 
         const char* shortName = route["shortName"];
@@ -182,7 +186,7 @@ bool BkkDeparturesProvider::parseBkkResponse(
         // Determine if bus or train and add to appropriate array
         Departure dep = {};
         strlcpy(dep.line, shortName, sizeof(dep.line));
-        strlcpy(dep.routeIdText, description, sizeof(dep.routeIdText));
+        strlcpy(dep.routeIdText, description ? description : "", sizeof(dep.routeIdText));
         strlcpy(dep.destination, headsign, sizeof(dep.destination));
         strlcpy(dep.stopName, stopName, sizeof(dep.stopName));
         dep.minutes = static_cast<int>(minutesToDep);

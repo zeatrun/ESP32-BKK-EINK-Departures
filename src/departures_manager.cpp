@@ -1,6 +1,7 @@
 #include "departures_manager.h"
 #include "data_layer.h"
 #include <freertos/portmacro.h>
+#include <WiFi.h>
 
 DeparturesManager g_departuresManager;
 
@@ -34,7 +35,8 @@ void DeparturesManager::start()
 
     m_running = true;
     const char taskName[] = "departures";
-    const uint32_t stackSize = 8192;
+    // HTTPS + JSON parsing for BKK can require more stack on ESP32.
+    const uint32_t stackSize = 12288;
     const UBaseType_t priority = tskIDLE_PRIORITY + 2; // Higher priority than weather
 
     if (xTaskCreate(taskEntry, taskName, stackSize, this, priority, &m_taskHandle) != pdPASS)
@@ -67,6 +69,13 @@ void DeparturesManager::fetchNow()
     if (m_provider == nullptr)
     {
         Serial.println("[DEPARTURES_MANAGER] No provider configured");
+        return;
+    }
+
+    if (WiFi.status() != WL_CONNECTED)
+    {
+        Serial.println("[DEPARTURES_MANAGER] Skipping fetch: WiFi not connected");
+        m_connected = false;
         return;
     }
 
