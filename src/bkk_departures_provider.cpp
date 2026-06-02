@@ -4,6 +4,7 @@
 #include <time.h>
 #include <algorithm>
 #include <cstring>
+#include <cctype>
 
 BkkDeparturesProvider::BkkDeparturesProvider(const char* apiKey, const char* stopId)
 {
@@ -88,12 +89,25 @@ bool BkkDeparturesProvider::fetchDepartures(
     return parseBkkResponse(payload, outBuses, outBusCount, outTrains, outTrainCount);
 }
 
-bool BkkDeparturesProvider::isTrainRoute(const char* description)
+bool BkkDeparturesProvider::isTrainRoute(const char* shortName, const char* description)
 {
-    if (!description)
-        return false;
+    // Primary classifier: line prefix. Numeric lines are buses, letter-prefixed are trains.
+    if (shortName != nullptr && shortName[0] != '\0')
+    {
+        const unsigned char first = static_cast<unsigned char>(shortName[0]);
+        if (isdigit(first))
+        {
+            return false;
+        }
+        return true;
+    }
 
-    // Simple heuristic: check for "Z" prefix or "train" in description
+    if (!description)
+    {
+        return false;
+    }
+
+    // Fallback heuristic from textual description.
     const String desc(description);
     return desc.indexOf("Z") == 0 || desc.indexOf("Train") >= 0 || desc.indexOf("MAV") >= 0;
 }
@@ -192,7 +206,7 @@ bool BkkDeparturesProvider::parseBkkResponse(
         dep.minutes = static_cast<int>(minutesToDep);
         dep.timestamp = static_cast<unsigned long>(depTimeMs / 1000);
 
-        if (isTrainRoute(description))
+        if (isTrainRoute(shortName, description))
         {
             if (outTrainCount < MAX_DEPARTURES)
             {

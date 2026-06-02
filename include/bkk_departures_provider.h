@@ -54,7 +54,9 @@ private:
     );
 
     /**
-     * Determine if a route is a bus or train based on route description/type.
+     * Determine if a route is a train.
+     * Primary signal: shortName prefix (digit=bus, letter=train).
+     * Secondary fallback: route description keywords.
      */
-    static bool isTrainRoute(const char* description);
+    static bool isTrainRoute(const char* shortName, const char* description);
 };
