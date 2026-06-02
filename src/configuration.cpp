@@ -251,6 +251,21 @@ String buildConfigPage(const Configuration& cfg)
     html.replace("{{MQTT_DEPARTURES_TOPIC}}", htmlEscape(cfg.mqttTopicDepartures()));
     html.replace("{{MQTT_WEATHER_TOPIC}}", htmlEscape(cfg.mqttTopicWeather()));
     html.replace("{{TIMEZONE_OPTIONS}}", timezoneOptions);
+    
+    html.replace("{{WEATHER_DATA_SOURCE_MQTT}}", cfg.weatherDataSourceMode() == Configuration::DataSourceMode::Mqtt ? "selected" : "");
+    html.replace("{{WEATHER_DATA_SOURCE_API}}", cfg.weatherDataSourceMode() == Configuration::DataSourceMode::DirectApi ? "selected" : "");
+    html.replace("{{WEATHER_API_OPENMETEO}}", cfg.weatherApiProvider() == Configuration::WeatherApiProvider::OpenMeteo ? "selected" : "");
+    html.replace("{{WEATHER_API_OWM}}", cfg.weatherApiProvider() == Configuration::WeatherApiProvider::OpenWeatherMap ? "selected" : "");
+    html.replace("{{DEPARTURES_DATA_SOURCE_MQTT}}", cfg.departuresDataSourceMode() == Configuration::DataSourceMode::Mqtt ? "selected" : "");
+    html.replace("{{DEPARTURES_DATA_SOURCE_API}}", cfg.departuresDataSourceMode() == Configuration::DataSourceMode::DirectApi ? "selected" : "");
+    html.replace("{{DEPARTURES_API_BKK}}", cfg.departuresApiProvider() == Configuration::DeparturesApiProvider::Bkk ? "selected" : "");
+    html.replace("{{DEPARTURES_API_MOCK}}", cfg.departuresApiProvider() == Configuration::DeparturesApiProvider::MockData ? "selected" : "");
+    
+    html.replace("{{LOCATION_NAME}}", htmlEscape(cfg.locationName()));
+    html.replace("{{BKK_API_KEY}}", htmlEscape(cfg.bkkApiKey()));
+    html.replace("{{BUS_STOP_ID}}", htmlEscape(cfg.busStopId()));
+    html.replace("{{TRAIN_STOP_ID}}", htmlEscape(cfg.trainStopId()));
+    
     return html;
 }
 
@@ -342,8 +357,43 @@ void Configuration::load()
     const String depTopic = prefs.getString("mqtt_dep", m_mqttTopicDepartures);
     const String weatherTopic = prefs.getString("mqtt_wth", m_mqttTopicWeather);
     const String timezone = prefs.getString("tz", m_timezone);
-    const bool useMqttDataSource = prefs.getBool("use_mqtt", DUMMY_DEFAULT_USE_MQTT);
+
+    const bool hasWeatherSrcKey = prefs.isKey("wth_src");
+    const bool hasDeparturesSrcKey = prefs.isKey("dep_src");
+    const bool legacyUseMqtt = prefs.getBool("use_mqtt", DUMMY_DEFAULT_USE_MQTT);
+    const uint8_t legacySourceMode = legacyUseMqtt
+                                     ? static_cast<uint8_t>(DataSourceMode::Mqtt)
+                                     : static_cast<uint8_t>(DataSourceMode::DirectApi);
+
+    const uint8_t weatherDataSourceMode = hasWeatherSrcKey
+                                          ? prefs.getUChar("wth_src", static_cast<uint8_t>(DataSourceMode::Mqtt))
+                                          : legacySourceMode;
+    const uint8_t departuresDataSourceMode = hasDeparturesSrcKey
+                                             ? prefs.getUChar("dep_src", static_cast<uint8_t>(DataSourceMode::Mqtt))
+                                             : legacySourceMode;
+
+    const uint8_t weatherApiProvider = prefs.getUChar("wth_api", static_cast<uint8_t>(WeatherApiProvider::OpenMeteo));
+    const uint8_t departuresApiProvider = prefs.getUChar("dep_api", static_cast<uint8_t>(DeparturesApiProvider::Bkk));
+    const String locationName = prefs.getString("location", m_locationName);
+    const String bkkApiKey = prefs.getString("bkk_key", m_bkkApiKey);
+    const bool hasBusStopKey = prefs.isKey("bus_stop");
+    const bool hasTrainStopKey = prefs.isKey("train_stop");
+    const String legacyBkkStopId = prefs.getString("bkk_stop", "");
+    const String busStopId = hasBusStopKey ? prefs.getString("bus_stop", m_busStopId) : legacyBkkStopId;
+    const String trainStopId = hasTrainStopKey ? prefs.getString("train_stop", m_trainStopId) : legacyBkkStopId;
     prefs.end();
+
+    if (!hasWeatherSrcKey || !hasDeparturesSrcKey)
+    {
+        Serial.printf("[CONFIG] Legacy migration: use_mqtt=%s -> weatherSource=%u departuresSource=%u\n",
+                      legacyUseMqtt ? "true" : "false",
+                      static_cast<unsigned int>(weatherDataSourceMode),
+                      static_cast<unsigned int>(departuresDataSourceMode));
+    }
+    if ((!hasBusStopKey || !hasTrainStopKey) && legacyBkkStopId.length() > 0)
+    {
+        Serial.printf("[CONFIG] Legacy migration: bkk_stop='%s' copied to bus/train stop\n", legacyBkkStopId.c_str());
+    }
 
     strlcpy(m_wifiSsid, wifiSsid.c_str(), sizeof(m_wifiSsid));
     strlcpy(m_wifiPassword, wifiPassword.c_str(), sizeof(m_wifiPassword));
@@ -352,18 +402,30 @@ void Configuration::load()
     strlcpy(m_mqttTopicDepartures, depTopic.c_str(), sizeof(m_mqttTopicDepartures));
     strlcpy(m_mqttTopicWeather, weatherTopic.c_str(), sizeof(m_mqttTopicWeather));
     strlcpy(m_timezone, timezone.c_str(), sizeof(m_timezone));
-    m_dataSourceMode = dataSourceModeFromStoredBool(useMqttDataSource);
+    m_weatherDataSourceMode = static_cast<DataSourceMode>(weatherDataSourceMode);
+    m_departuresDataSourceMode = static_cast<DataSourceMode>(departuresDataSourceMode);
+    m_weatherApiProvider = static_cast<WeatherApiProvider>(weatherApiProvider);
+    m_departuresApiProvider = static_cast<DeparturesApiProvider>(departuresApiProvider);
+    strlcpy(m_locationName, locationName.c_str(), sizeof(m_locationName));
+    strlcpy(m_bkkApiKey, bkkApiKey.c_str(), sizeof(m_bkkApiKey));
+    strlcpy(m_busStopId, busStopId.c_str(), sizeof(m_busStopId));
+    strlcpy(m_trainStopId, trainStopId.c_str(), sizeof(m_trainStopId));
 
     Serial.println("[CONFIG] Configuration loaded from NVS.");
-    Serial.printf("[CONFIG] Loaded values: wifiSsid='%s' wifiPassword='%s' mqttServer='%s' mqttPort=%u depTopic='%s' weatherTopic='%s' tz='%s' dataSource='%s'\n",
+    Serial.printf("[CONFIG] Loaded values: wifiSsid='%s' wifiPassword='%s' mqttServer='%s' mqttPort=%u depTopic='%s' weatherTopic='%s' tz='%s'\n",
                   m_wifiSsid,
                   m_wifiPassword,
                   m_mqttServer,
                   static_cast<unsigned int>(m_mqttPort),
                   m_mqttTopicDepartures,
                   m_mqttTopicWeather,
-                  m_timezone,
-                  dataSourceModeToString(m_dataSourceMode));
+                  m_timezone);
+    Serial.printf("[CONFIG] Data sources: weather=%u departures=%u location='%s' busStop='%s' trainStop='%s'\n",
+                  static_cast<unsigned int>(m_weatherDataSourceMode),
+                  static_cast<unsigned int>(m_departuresDataSourceMode),
+                  m_locationName,
+                  m_busStopId,
+                  m_trainStopId);
 }
 
 void Configuration::loadDefaults()
@@ -374,7 +436,14 @@ void Configuration::loadDefaults()
     m_mqttPort = SETTINGS_MQTT_PORT;
     strlcpy(m_mqttTopicDepartures,    SETTINGS_MQTT_TOPIC_DEPARTURES,  sizeof(m_mqttTopicDepartures));
     strlcpy(m_mqttTopicWeather,       SETTINGS_MQTT_TOPIC_WEATHER,     sizeof(m_mqttTopicWeather));
-    m_dataSourceMode = dataSourceModeFromStoredBool(DUMMY_DEFAULT_USE_MQTT);
+    m_weatherDataSourceMode = DataSourceMode::Mqtt;
+    m_departuresDataSourceMode = DataSourceMode::Mqtt;
+    
+#if defined(SETTINGS_BKK_API_KEY) && defined(SETTINGS_BKK_STOP_ID)
+    strlcpy(m_bkkApiKey,              SETTINGS_BKK_API_KEY,            sizeof(m_bkkApiKey));
+    strlcpy(m_busStopId,              SETTINGS_BKK_STOP_ID,            sizeof(m_busStopId));
+#endif
+    
     // Timezone default is already set by the member initialiser; do not overwrite
     // unless a stored setting is available in the future.
 }
@@ -395,11 +464,26 @@ void Configuration::save()
     prefs.putString("mqtt_dep", m_mqttTopicDepartures);
     prefs.putString("mqtt_wth", m_mqttTopicWeather);
     prefs.putString("tz", m_timezone);
-    prefs.putBool("use_mqtt", m_dataSourceMode == DataSourceMode::Mqtt);
+    prefs.putUChar("wth_src", static_cast<uint8_t>(m_weatherDataSourceMode));
+    prefs.putUChar("dep_src", static_cast<uint8_t>(m_departuresDataSourceMode));
+    prefs.putUChar("wth_api", static_cast<uint8_t>(m_weatherApiProvider));
+    prefs.putUChar("dep_api", static_cast<uint8_t>(m_departuresApiProvider));
+    prefs.putString("location", m_locationName);
+    prefs.putString("bkk_key", m_bkkApiKey);
+    prefs.putString("bus_stop", m_busStopId);
+    prefs.putString("train_stop", m_trainStopId);
     prefs.putBool("has", true);
     prefs.end();
 
-    Serial.println("[CONFIG] Configuration saved to NVS.");
+    Serial.printf("[CONFIG] Configuration saved to NVS. weatherSource=%u departuresSource=%u weatherApi=%u departuresApi=%u\n",
+                  static_cast<unsigned int>(m_weatherDataSourceMode),
+                  static_cast<unsigned int>(m_departuresDataSourceMode),
+                  static_cast<unsigned int>(m_weatherApiProvider),
+                  static_cast<unsigned int>(m_departuresApiProvider));
+    Serial.printf("[CONFIG] Saved location='%s' busStop='%s' trainStop='%s'\n",
+                  m_locationName,
+                  m_busStopId,
+                  m_trainStopId);
 }
 
 void Configuration::scheduleReboot(uint32_t delayMs)
@@ -571,9 +655,88 @@ void Configuration::setTimezone(const char* tz)
     }
 }
 
-void Configuration::setDataSourceMode(DataSourceMode mode)
+void Configuration::setWeatherDataSourceMode(DataSourceMode mode)
 {
-    m_dataSourceMode = mode;
+    m_weatherDataSourceMode = mode;
+}
+
+void Configuration::setDeparturesDataSourceMode(DataSourceMode mode)
+{
+    m_departuresDataSourceMode = mode;
+}
+
+void Configuration::setWeatherApiProvider(WeatherApiProvider provider)
+{
+    m_weatherApiProvider = provider;
+}
+
+void Configuration::setDeparturesApiProvider(DeparturesApiProvider provider)
+{
+    m_departuresApiProvider = provider;
+}
+
+void Configuration::setLocationName(const char* location)
+{
+    if (location != nullptr)
+    {
+        strlcpy(m_locationName, location, sizeof(m_locationName));
+    }
+}
+
+void Configuration::setBkkApiKey(const char* key)
+{
+    if (key != nullptr)
+    {
+        strlcpy(m_bkkApiKey, key, sizeof(m_bkkApiKey));
+    }
+}
+
+void Configuration::setBusStopId(const char* stopId)
+{
+    if (stopId != nullptr)
+    {
+        strlcpy(m_busStopId, stopId, sizeof(m_busStopId));
+    }
+}
+
+void Configuration::setTrainStopId(const char* stopId)
+{
+    if (stopId != nullptr)
+    {
+        strlcpy(m_trainStopId, stopId, sizeof(m_trainStopId));
+    }
+}
+
+bool Configuration::resolveLocationCoordinates(const char* city, float& lat, float& lon)
+{
+    // Simple static lookup table for Hungarian cities
+    const struct {
+        const char* name;
+        float latitude;
+        float longitude;
+    } cities[] = {
+        {"Budapest", 47.4979f, 19.0402f},
+        {"Pilisvorosvar", 47.6108f, 18.9133f},
+        {"Pilisszentivan", 47.6130f, 18.9080f},
+        {"Esztergom", 47.7857f, 18.7521f},
+    };
+
+    if (!city || strlen(city) == 0)
+    {
+        return false;
+    }
+
+    for (const auto& c : cities)
+    {
+        if (strcasecmp(city, c.name) == 0)
+        {
+            lat = c.latitude;
+            lon = c.longitude;
+            return true;
+        }
+    }
+
+    return false;
 }
 
 void Configuration::generateConfigApCredentials()
@@ -674,7 +837,12 @@ void Configuration::handleSavePost()
           m_webServer->hasArg("mqtt_port") &&
           m_webServer->hasArg("mqtt_departures_topic") &&
           m_webServer->hasArg("mqtt_weather_topic") &&
-          m_webServer->hasArg("timezone")))
+          m_webServer->hasArg("timezone") &&
+          m_webServer->hasArg("weather_data_source") &&
+          m_webServer->hasArg("departures_data_source") &&
+          m_webServer->hasArg("weather_api_provider") &&
+          m_webServer->hasArg("departures_api_provider") &&
+          m_webServer->hasArg("location_name")))
     {
         sendValidationError(*m_webServer, "Missing required fields.");
         return;
@@ -687,6 +855,14 @@ void Configuration::handleSavePost()
     const String depTopic = trimCopy(m_webServer->arg("mqtt_departures_topic"));
     const String weatherTopic = trimCopy(m_webServer->arg("mqtt_weather_topic"));
     const String timezone = trimCopy(m_webServer->arg("timezone"));
+    const String weatherDataSourceText = trimCopy(m_webServer->arg("weather_data_source"));
+    const String departuresDataSourceText = trimCopy(m_webServer->arg("departures_data_source"));
+    const String weatherApiProviderText = trimCopy(m_webServer->arg("weather_api_provider"));
+    const String departuresApiProviderText = trimCopy(m_webServer->arg("departures_api_provider"));
+    const String locationName = trimCopy(m_webServer->arg("location_name"));
+    const String bkkApiKey = trimCopy(m_webServer->arg("bkk_api_key"));
+    const String busStopId = trimCopy(m_webServer->arg("bus_stop_id"));
+    const String trainStopId = trimCopy(m_webServer->arg("train_stop_id"));
 
     if (wifiSsid.isEmpty() || wifiSsid.length() > (sizeof(m_wifiSsid) - 1) || !isAsciiPrintableNoCtrl(wifiSsid))
     {
@@ -731,6 +907,47 @@ void Configuration::handleSavePost()
         return;
     }
 
+    if (locationName.isEmpty() || locationName.length() > (sizeof(m_locationName) - 1))
+    {
+        sendValidationError(*m_webServer, "Invalid location name (1-48 chars).");
+        return;
+    }
+
+    const long weatherDataSourceVal = weatherDataSourceText.toInt();
+    if (weatherDataSourceVal < 0 || weatherDataSourceVal > 1)
+    {
+        sendValidationError(*m_webServer, "Invalid weather data source.");
+        return;
+    }
+
+    const long departuresDataSourceVal = departuresDataSourceText.toInt();
+    if (departuresDataSourceVal < 0 || departuresDataSourceVal > 1)
+    {
+        sendValidationError(*m_webServer, "Invalid departures data source.");
+        return;
+    }
+
+    const long weatherApiProviderVal = weatherApiProviderText.toInt();
+    if (weatherApiProviderVal < 0 || weatherApiProviderVal > 1)
+    {
+        sendValidationError(*m_webServer, "Invalid weather API provider.");
+        return;
+    }
+
+    const long departuresApiProviderVal = departuresApiProviderText.toInt();
+    if (departuresApiProviderVal < 0 || departuresApiProviderVal > 1)
+    {
+        sendValidationError(*m_webServer, "Invalid departures API provider.");
+        return;
+    }
+
+    Serial.printf("[CONFIG] Save request parsed: weatherSource=%ld departuresSource=%ld weatherApi=%ld departuresApi=%ld location='%s'\n",
+                  weatherDataSourceVal,
+                  departuresDataSourceVal,
+                  weatherApiProviderVal,
+                  departuresApiProviderVal,
+                  locationName.c_str());
+
     setWifiSsid(wifiSsid.c_str());
     setWifiPassword(wifiPassword.c_str());
     setMqttServer(mqttServer.c_str());
@@ -738,6 +955,14 @@ void Configuration::handleSavePost()
     setMqttTopicDepartures(depTopic.c_str());
     setMqttTopicWeather(weatherTopic.c_str());
     setTimezone(timezone.c_str());
+    setWeatherDataSourceMode(static_cast<DataSourceMode>(weatherDataSourceVal));
+    setDeparturesDataSourceMode(static_cast<DataSourceMode>(departuresDataSourceVal));
+    setWeatherApiProvider(static_cast<WeatherApiProvider>(weatherApiProviderVal));
+    setDeparturesApiProvider(static_cast<DeparturesApiProvider>(departuresApiProviderVal));
+    setLocationName(locationName.c_str());
+    setBkkApiKey(bkkApiKey.c_str());
+    setBusStopId(busStopId.c_str());
+    setTrainStopId(trainStopId.c_str());
 
     save();
     renderConfigScreen();
@@ -813,8 +1038,14 @@ void Configuration::handleApiSettingsGet()
     json += "\"timezone\":\"";
     json += timezone();
     json += "\",";
-    json += "\"dataSource\":\"";
-    json += dataSourceModeToString(dataSourceMode());
+    json += "\"weatherDataSource\":";
+    json += String(static_cast<unsigned int>(weatherDataSourceMode()));
+    json += ",";
+    json += "\"departuresDataSource\":";
+    json += String(static_cast<unsigned int>(departuresDataSourceMode()));
+    json += ",";
+    json += "\"location\":\"";
+    json += locationName();
     json += "\"";
     json += "}";
     m_webServer->send(200, "application/json", json);

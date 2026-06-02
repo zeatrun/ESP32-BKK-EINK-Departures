@@ -52,6 +52,52 @@
         {{TIMEZONE_OPTIONS}}
       </select>
 
+      <hr style='margin: 20px 0; border: none; border-top: 1px solid #cbd5e1;'>
+      <h3 style='font-size: 1rem; margin: 10px 0;'>Weather Settings</h3>
+
+      <label for='weather_data_source'>Weather Data Source</label>
+      <select id='weather_data_source' name='weather_data_source' required>
+        <option value='0' {{WEATHER_DATA_SOURCE_MQTT}}>MQTT</option>
+        <option value='1' {{WEATHER_DATA_SOURCE_API}}>Direct API</option>
+      </select>
+
+      <label for='weather_api_provider'>Weather API Provider</label>
+      <select id='weather_api_provider' name='weather_api_provider' required>
+        <option value='0' {{WEATHER_API_OPENMETEO}}>Open-Meteo</option>
+        <option value='1' {{WEATHER_API_OWM}}>OpenWeatherMap</option>
+      </select>
+
+      <label for='location_name'>Location (City)</label>
+      <input id='location_name' name='location_name' value='{{LOCATION_NAME}}' maxlength='48' required>
+      <div class='hint'>e.g., Budapest, Pilisvorosvar, Esztergom</div>
+
+      <hr style='margin: 20px 0; border: none; border-top: 1px solid #cbd5e1;'>
+      <h3 style='font-size: 1rem; margin: 10px 0;'>Departures Settings</h3>
+
+      <label for='departures_data_source'>Departures Data Source</label>
+      <select id='departures_data_source' name='departures_data_source' required>
+        <option value='0' {{DEPARTURES_DATA_SOURCE_MQTT}}>MQTT</option>
+        <option value='1' {{DEPARTURES_DATA_SOURCE_API}}>Direct API</option>
+      </select>
+
+      <label for='departures_api_provider'>Departures API Provider</label>
+      <select id='departures_api_provider' name='departures_api_provider' required>
+        <option value='0' {{DEPARTURES_API_BKK}}>BKK (Budapest)</option>
+        <option value='1' {{DEPARTURES_API_MOCK}}>Mock Data</option>
+      </select>
+
+      <label for='bkk_api_key'>BKK API Key</label>
+      <input id='bkk_api_key' name='bkk_api_key' value='{{BKK_API_KEY}}' maxlength='127' autocomplete='off'>
+      <div class='hint'>Get from https://futar.bkk.hu/</div>
+
+      <label for='bus_stop_id'>Bus Stop ID</label>
+      <input id='bus_stop_id' name='bus_stop_id' value='{{BUS_STOP_ID}}' maxlength='63' autocomplete='off'>
+      <div class='hint'>e.g., BKK_005501438_0</div>
+
+      <label for='train_stop_id'>Train Stop ID</label>
+      <input id='train_stop_id' name='train_stop_id' value='{{TRAIN_STOP_ID}}' maxlength='63' autocomplete='off'>
+      <div class='hint'>e.g., BKK_005501438_0</div>
+
       <div class='actions'>
         <button type='submit'>Save</button>
       </div>

@@ -49,6 +49,65 @@ It is designed for low-noise updates on e-paper and for robust operation with re
 - [script/weather_grabber.py](script/weather_grabber.py): helper publisher for Open-Meteo weather
 - [gen](gen): generated image headers (included via compiler include path)
 
+## Software Architecture (Current)
+
+The diagram below shows the current runtime architecture with independent source selection for weather and departures.
+
+```mermaid
+flowchart LR
+	subgraph Device[ESP32 Firmware]
+		Boot[main.cpp setup]
+		Cfg[Configuration/NVS]
+		Wifi[WiFi Manager Task]
+		DSM[Data Source Manager]
+		MQTT[Mqtt Manager Task]
+		WMgr[Weather Manager Task]
+		DMgr[Departures Manager Task]
+		WProv[OpenMeteo Weather Provider]
+		DProv[BKK Departures Provider]
+		Layer[(Common Data Layer\nmutex protected)]
+		Disp[Display Manager Task]
+		Time[Time Manager Task]
+	end
+
+	subgraph External[External Services]
+		Broker[(MQTT Broker)]
+		OM[Open-Meteo API]
+		BKK[BKK API]
+	end
+
+	Boot --> Cfg
+	Boot --> Wifi
+	Boot --> DSM
+	Boot --> Disp
+	Boot --> Time
+
+	Wifi --> DSM
+
+	DSM -->|weather source = MQTT| MQTT
+	DSM -->|departures source = MQTT| MQTT
+	DSM -->|weather source = Direct API| WMgr
+	DSM -->|departures source = Direct API| DMgr
+
+	MQTT <--> Broker
+	MQTT --> Layer
+
+	WMgr --> WProv
+	WProv <--> OM
+	WMgr --> Layer
+
+	DMgr --> DProv
+	DProv <--> BKK
+	DMgr --> Layer
+
+	Layer --> Disp
+```
+
+Notes:
+- Weather and departures can run in mixed mode (one on MQTT, the other on Direct API).
+- Configuration page values are stored in NVS and reloaded at boot.
+- Display reads from shared data and redraws on notify + periodic refresh policy.
+
 ## Configuration
 
 1. Create a local settings header:

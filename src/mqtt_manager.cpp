@@ -1,4 +1,6 @@
 #include "mqtt_manager.h"
+#include "data_layer.h"
+#include "configuration.h"
 #include "departures.h"
 #include "weather.h"
 #include "display_manager.h"
@@ -188,44 +190,19 @@ static PayloadProcessResult handleDeparturePayload(JsonVariantConst payloadRoot)
         ++cnt;
     }
 
-    if (xSemaphoreTake(g_departuresMutex, pdMS_TO_TICKS(200)) == pdTRUE)
+    if (g_dataLayer.applyDepartures(nextBusDepartures, nextBusCount, nextTrainDepartures, nextTrainCount))
     {
-        const bool busesSame = departuresEqual(g_busDepartures, g_busCount,
-                                               nextBusDepartures, nextBusCount);
-        const bool trainsSame = departuresEqual(g_trainDepartures, g_trainCount,
-                                                nextTrainDepartures, nextTrainCount);
-
-        result.changed = !(busesSame && trainsSame);
         result.applied = true;
-        g_departuresValid = true;
-
-        if (result.changed)
-        {
-            g_busCount   = nextBusCount;
-            g_trainCount = nextTrainCount;
-
-            for (int i = 0; i < g_busCount; ++i)   g_busDepartures[i]   = nextBusDepartures[i];
-            for (int i = g_busCount; i < MAX_DEPARTURES; ++i) g_busDepartures[i] = {};
-
-            for (int i = 0; i < g_trainCount; ++i) g_trainDepartures[i] = nextTrainDepartures[i];
-            for (int i = g_trainCount; i < MAX_DEPARTURES; ++i) g_trainDepartures[i] = {};
-
-            Serial.print("[MQTT] Departures updated: ");
-            Serial.print(g_busCount);
-            Serial.print(" bus(es), ");
-            Serial.print(g_trainCount);
-            Serial.println(" train(s).");
-        }
-        else
-        {
-            Serial.println("[MQTT] No departure change; skipping display refresh.");
-        }
-
-        xSemaphoreGive(g_departuresMutex);
+        result.changed = true;
+        Serial.print("[MQTT] Departures applied via DataLayer: ");
+        Serial.print(nextBusCount);
+        Serial.print(" bus(es), ");
+        Serial.print(nextTrainCount);
+        Serial.println(" train(s).");
     }
     else
     {
-        Serial.println("[MQTT] Could not acquire departures mutex.");
+        Serial.println("[MQTT] DataLayer apply failed for departures.");
     }
 
     return result;
@@ -288,27 +265,15 @@ static PayloadProcessResult handleWeatherPayload(JsonVariantConst payloadRoot)
     }
     nextWeather.dailyCount = dayIndex;
 
-    if (xSemaphoreTake(g_weatherMutex, pdMS_TO_TICKS(200)) == pdTRUE)
+    if (g_dataLayer.applyWeather(nextWeather))
     {
-        result.changed = (!g_weatherValid) || (!weatherEquals(g_weatherData, nextWeather));
         result.applied = true;
-
-        if (result.changed)
-        {
-            g_weatherData = nextWeather;
-            g_weatherValid = true;
-            Serial.println("[MQTT] Weather updated.");
-        }
-        else
-        {
-            Serial.println("[MQTT] No weather change; skipping display refresh.");
-        }
-
-        xSemaphoreGive(g_weatherMutex);
+        result.changed = true;
+        Serial.println("[MQTT] Weather applied via DataLayer.");
     }
     else
     {
-        Serial.println("[MQTT] Could not acquire weather mutex.");
+        Serial.println("[MQTT] DataLayer apply failed for weather.");
     }
 
     return result;
@@ -378,10 +343,8 @@ static void mqttCallback(char* topic, byte* payload, unsigned int length)
         // Status refresh is handled together with the data refresh policy.
     }
 
-    if (changed || initialDataArrival)
-    {
-        displayNotifyDataChanged();
-    }
+    (void)changed;
+    (void)initialDataArrival;
 }
 
 // ── Internal helpers ─────────────────────────────────────────────────────────
@@ -416,6 +379,25 @@ static void mqttTask(void* /*pvParameters*/)
 {
     for (;;)
     {
+        // Hard guard: if both channels are DirectAPI, MQTT must stay idle.
+        if (!g_config.useWeatherMqtt() && !g_config.useDeparturesMqtt())
+        {
+            if (s_mqttClient != nullptr && s_clientMutex != nullptr
+                && xSemaphoreTake(s_clientMutex, pdMS_TO_TICKS(50)) == pdTRUE)
+            {
+                if (s_mqttClient->connected())
+                {
+                    s_mqttClient->disconnect();
+                    Serial.println("[MQTT] Disabled by config (DirectAPI for both), disconnected client.");
+                }
+                xSemaphoreGive(s_clientMutex);
+            }
+
+            setMqttConnected(false);
+            vTaskDelay(pdMS_TO_TICKS(1000));
+            continue;
+        }
+
         if (s_wifiEventGroup == nullptr || s_clientMutex == nullptr || s_mqttClient == nullptr)
         {
             if (!s_reportedInitIssue)

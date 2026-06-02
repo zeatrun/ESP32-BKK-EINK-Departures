@@ -1,9 +1,39 @@
 #include "wifi_manager.h"
+#include "configuration.h"
 
 // Bit 0 in the event group signals WiFi connected
 #define WIFI_CONNECTED_BIT BIT0
 
 static EventGroupHandle_t s_wifiEventGroup = nullptr;
+static volatile uint8_t s_lastDisconnectReason = 0;
+static bool s_eventHandlerRegistered = false;
+
+namespace
+{
+const char* wlStatusToString(wl_status_t status)
+{
+    switch (status)
+    {
+        case WL_NO_SHIELD: return "WL_NO_SHIELD";
+        case WL_IDLE_STATUS: return "WL_IDLE_STATUS";
+        case WL_NO_SSID_AVAIL: return "WL_NO_SSID_AVAIL";
+        case WL_SCAN_COMPLETED: return "WL_SCAN_COMPLETED";
+        case WL_CONNECTED: return "WL_CONNECTED";
+        case WL_CONNECT_FAILED: return "WL_CONNECT_FAILED";
+        case WL_CONNECTION_LOST: return "WL_CONNECTION_LOST";
+        case WL_DISCONNECTED: return "WL_DISCONNECTED";
+        default: return "WL_UNKNOWN";
+    }
+}
+
+void onWiFiEvent(WiFiEvent_t event, WiFiEventInfo_t info)
+{
+    if (event == ARDUINO_EVENT_WIFI_STA_DISCONNECTED)
+    {
+        s_lastDisconnectReason = info.wifi_sta_disconnected.reason;
+    }
+}
+}
 
 void wifiManagerInit(EventGroupHandle_t connectedEventGroup)
 {
@@ -12,6 +42,12 @@ void wifiManagerInit(EventGroupHandle_t connectedEventGroup)
 
 static void wifiTask(void* /*pvParameters*/)
 {
+    if (!s_eventHandlerRegistered)
+    {
+        WiFi.onEvent(onWiFiEvent);
+        s_eventHandlerRegistered = true;
+    }
+
     WiFi.mode(WIFI_STA);
 
     for (;;)
@@ -21,10 +57,19 @@ static void wifiTask(void* /*pvParameters*/)
             // Clear the connected bit while we try to (re)connect
             xEventGroupClearBits(s_wifiEventGroup, WIFI_CONNECTED_BIT);
 
-            Serial.print("[WiFi] Connecting to ");
-            Serial.println(WIFI_SSID);
+            const char* wifiSsid = g_config.wifiSsid();
+            const char* wifiPassword = g_config.wifiPassword();
+            if (wifiSsid == nullptr || wifiSsid[0] == '\0')
+            {
+                wifiSsid = WIFI_SSID;
+                wifiPassword = WIFI_PASSWORD;
+                Serial.println("[WiFi] Runtime config SSID empty, falling back to compile-time settings");
+            }
 
-            WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+            Serial.print("[WiFi] Connecting to ");
+            Serial.println(wifiSsid);
+
+            WiFi.begin(wifiSsid, wifiPassword);
 
             // Wait up to 10 s in 500 ms ticks
             uint8_t attempts = 0;
@@ -46,7 +91,12 @@ static void wifiTask(void* /*pvParameters*/)
             }
             else
             {
-                Serial.println("[WiFi] Failed. Retrying...");
+                const wl_status_t status = WiFi.status();
+                const wifi_err_reason_t reason = static_cast<wifi_err_reason_t>(s_lastDisconnectReason);
+                Serial.printf("[WiFi] Failed. status=%s(%d) reason=%s. Retrying...\n",
+                              wlStatusToString(status),
+                              static_cast<int>(status),
+                              WiFi.disconnectReasonName(reason));
                 WiFi.disconnect(true);
                 vTaskDelay(pdMS_TO_TICKS(WIFI_RECONNECT_DELAY_MS));
             }

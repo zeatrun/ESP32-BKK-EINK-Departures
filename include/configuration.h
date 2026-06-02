@@ -25,6 +25,18 @@ public:
         DirectApi = 1,
     };
 
+    enum class WeatherApiProvider : uint8_t
+    {
+        OpenMeteo = 0,
+        OpenWeatherMap = 1,
+    };
+
+    enum class DeparturesApiProvider : uint8_t
+    {
+        Bkk = 0,
+        MockData = 1,
+    };
+
     Configuration() = default;
 
     // ── Lifecycle ─────────────────────────────────────────────────────────────
@@ -66,8 +78,20 @@ public:
 
     const char* mqttTopicDepartures() const { return m_mqttTopicDepartures; }
     const char* mqttTopicWeather()    const { return m_mqttTopicWeather; }
-    DataSourceMode dataSourceMode() const { return m_dataSourceMode; }
-    bool useMqttDataSource() const { return m_dataSourceMode == DataSourceMode::Mqtt; }
+    
+    // Separate data source modes for weather and departures
+    DataSourceMode weatherDataSourceMode() const { return m_weatherDataSourceMode; }
+    DataSourceMode departuresDataSourceMode() const { return m_departuresDataSourceMode; }
+    bool useWeatherMqtt() const { return m_weatherDataSourceMode == DataSourceMode::Mqtt; }
+    bool useDeparturesMqtt() const { return m_departuresDataSourceMode == DataSourceMode::Mqtt; }
+
+    WeatherApiProvider weatherApiProvider() const { return m_weatherApiProvider; }
+    DeparturesApiProvider departuresApiProvider() const { return m_departuresApiProvider; }
+    
+    const char* locationName() const { return m_locationName; }
+    const char* bkkApiKey() const { return m_bkkApiKey; }
+    const char* busStopId() const { return m_busStopId; }
+    const char* trainStopId() const { return m_trainStopId; }
 
     /**
      * POSIX timezone string, e.g. "CET-1CEST,M3.5.0,M10.5.0/3" for Budapest.
@@ -86,7 +110,21 @@ public:
     void setMqttTopicDepartures(const char* topic);
     void setMqttTopicWeather(const char* topic);
     void setTimezone(const char* tz);
-    void setDataSourceMode(DataSourceMode mode);
+    void setWeatherDataSourceMode(DataSourceMode mode);
+    void setDeparturesDataSourceMode(DataSourceMode mode);
+    void setWeatherApiProvider(WeatherApiProvider provider);
+    void setDeparturesApiProvider(DeparturesApiProvider provider);
+    void setLocationName(const char* location);
+    void setBkkApiKey(const char* key);
+    void setBusStopId(const char* stopId);
+    void setTrainStopId(const char* stopId);
+
+    /**
+     * Helper: resolve city name to latitude/longitude (static lookup table).
+     * Returns true if the city was found, false otherwise.
+     * On success, lat and lon are filled with the city coordinates.
+     */
+    bool resolveLocationCoordinates(const char* city, float& lat, float& lon);
 
 private:
     char     m_wifiSsid[64]               = {};
@@ -95,7 +133,14 @@ private:
     uint16_t m_mqttPort                   = 1883;
     char     m_mqttTopicDepartures[128]   = {};
     char     m_mqttTopicWeather[128]      = {};
-    DataSourceMode m_dataSourceMode       = DataSourceMode::Mqtt;
+    DataSourceMode m_weatherDataSourceMode = DataSourceMode::Mqtt;
+    DataSourceMode m_departuresDataSourceMode = DataSourceMode::Mqtt;
+    WeatherApiProvider m_weatherApiProvider = WeatherApiProvider::OpenMeteo;
+    DeparturesApiProvider m_departuresApiProvider = DeparturesApiProvider::Bkk;
+    char     m_locationName[48]           = {}; // e.g., "Budapest"
+    char     m_bkkApiKey[128]             = {};
+    char     m_busStopId[64]              = {};
+    char     m_trainStopId[64]            = {};
     // POSIX TZ string — default: Central European Time with automatic DST.
     char     m_timezone[64]               = "CET-1CEST,M3.5.0,M10.5.0/3";
 

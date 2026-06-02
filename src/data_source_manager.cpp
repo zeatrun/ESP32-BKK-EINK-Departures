@@ -4,6 +4,13 @@
 #include "display_manager.h"
 #include "mqtt_manager.h"
 #include "weather.h"
+#include "weather_manager.h"
+#include "departures_manager.h"
+#include "weather_provider.h"
+#include "openmeteo_weather_provider.h"
+#include "departures_provider.h"
+#include "bkk_departures_provider.h"
+#include "configuration.h"
 
 // Matches wifi_manager.cpp
 #define WIFI_CONNECTED_BIT BIT0
@@ -257,9 +264,7 @@ bool applyDummyWeather(uint32_t tickIndex)
 
 void directApiTask(void* /*pvParameters*/)
 {
-    uint32_t tickIndex = 0;
-    bool firstApplied = false;
-
+    Serial.println("[DATA][MONITOR] DirectApi monitor task started");
     for (;;)
     {
         if (s_wifiEventGroup == nullptr)
@@ -274,31 +279,41 @@ void directApiTask(void* /*pvParameters*/)
 
         if (!wifiUp)
         {
+            Serial.println("[DATA][MONITOR] WiFi down, waiting for reconnect...");
             setStatusConnected(false);
             xEventGroupWaitBits(s_wifiEventGroup,
                                 WIFI_CONNECTED_BIT,
                                 pdFALSE,
                                 pdTRUE,
                                 portMAX_DELAY);
+            Serial.println("[DATA][MONITOR] WiFi reconnected");
             continue;
         }
 
-        setStatusConnected(true);
+        bool weatherReady = true;
+        bool departuresReady = true;
 
-        // Placeholder path: later replace with real direct weather/BKK API calls.
-        const bool depChanged = applyDummyDepartures(tickIndex);
-        const bool weatherChanged = applyDummyWeather(tickIndex);
-
-        if (depChanged || weatherChanged || !firstApplied)
+        if (!g_config.useWeatherMqtt())
         {
-            displayNotifyDataChanged();
-            firstApplied = true;
+            weatherReady = g_weatherManager.isConnected();
+        }
+        if (!g_config.useDeparturesMqtt())
+        {
+            departuresReady = g_departuresManager.isConnected();
         }
 
-        markLastUpdateNow();
-        ++tickIndex;
+        const bool connected = weatherReady && departuresReady;
+        Serial.printf("[DATA][MONITOR] states: weatherReady=%s departuresReady=%s => connected=%s\n",
+                  weatherReady ? "true" : "false",
+                  departuresReady ? "true" : "false",
+                  connected ? "true" : "false");
+        setStatusConnected(connected);
 
-        vTaskDelay(API_POLL_INTERVAL_TICKS);
+        // Notify display task regularly so it can render first arrival and periodic refreshes.
+        displayNotifyDataChanged();
+
+        markLastUpdateNow();
+        vTaskDelay(pdMS_TO_TICKS(5000)); // Monitor interval
     }
 }
 }
@@ -310,9 +325,22 @@ void dataSourceManagerInit(EventGroupHandle_t connectedEventGroup,
     s_wifiEventGroup = connectedEventGroup;
     s_clientMutex = clientMutex;
     s_espClient = &espClient;
-    s_mode = g_config.dataSourceMode();
+    // s_mode is derived from weatherDataSourceMode for backward compatibility
+    s_mode = g_config.useWeatherMqtt() ? Configuration::DataSourceMode::Mqtt : Configuration::DataSourceMode::DirectApi;
 
-    if (s_mode == Configuration::DataSourceMode::Mqtt)
+    Serial.printf("[DATA][INIT] weatherSource=%s departuresSource=%s weatherApi=%u departuresApi=%u\n",
+                  g_config.useWeatherMqtt() ? "MQTT" : "DirectAPI",
+                  g_config.useDeparturesMqtt() ? "MQTT" : "DirectAPI",
+                  static_cast<unsigned int>(g_config.weatherApiProvider()),
+                  static_cast<unsigned int>(g_config.departuresApiProvider()));
+    Serial.printf("[DATA][INIT] location='%s' timezone='%s' busStop='%s' trainStop='%s'\n",
+                  g_config.locationName(),
+                  g_config.timezone(),
+                  g_config.busStopId(),
+                  g_config.trainStopId());
+
+    // If weather and/or departures use MQTT, init MQTT manager
+    if (g_config.useWeatherMqtt() || g_config.useDeparturesMqtt())
     {
         MqttRuntimeConfig mqttCfg = {
             g_config.mqttServer(),
@@ -321,49 +349,153 @@ void dataSourceManagerInit(EventGroupHandle_t connectedEventGroup,
             g_config.mqttTopicWeather()
         };
         mqttManagerInit(s_wifiEventGroup, *s_espClient, s_clientMutex, mqttCfg);
-        Serial.println("[DATA] Selected data source: MQTT");
+        if (g_config.useWeatherMqtt() && g_config.useDeparturesMqtt())
+        {
+            Serial.println("[DATA] Selected data source: MQTT for both");
+        }
+        else
+        {
+            Serial.printf("[DATA] Mixed data sources: weather=%s departures=%s\n",
+                          g_config.useWeatherMqtt() ? "MQTT" : "DirectAPI",
+                          g_config.useDeparturesMqtt() ? "MQTT" : "DirectAPI");
+        }
     }
     else
     {
-        Serial.println("[DATA] Selected data source: DIRECT_API (dummy mode)");
+        Serial.println("[DATA] Selected data source: DIRECT_API for both");
+    }
+
+    // Initialize DirectAPI providers (weather and/or departures)
+    if (!g_config.useWeatherMqtt())
+    {
+        // Initialize weather provider based on configuration
+        WeatherProvider* weatherProvider = nullptr;
+        if (g_config.weatherApiProvider() == Configuration::WeatherApiProvider::OpenMeteo)
+        {
+            // Resolve location coordinates from configuration
+            float latitude = 47.62f;   // Default: Budapest
+            float longitude = 18.90f;
+            if (!g_config.resolveLocationCoordinates(g_config.locationName(), latitude, longitude))
+            {
+                Serial.printf("[DATA] Warning: Unknown location '%s', using Budapest defaults\n", g_config.locationName());
+            }
+            weatherProvider = new OpenMeteoWeatherProvider(latitude, longitude, g_config.timezone());
+            Serial.printf("[DATA] Weather provider: Open-Meteo (location: %s, lat=%.2f, lon=%.2f)\n", 
+                          g_config.locationName(), latitude, longitude);
+        }
+
+        if (weatherProvider)
+        {
+            g_weatherManager.init(weatherProvider, 300000); // 5 minute interval
+        }
+        else
+        {
+            Serial.println("[DATA][INIT] No weather provider created for DirectAPI");
+        }
+    }
+
+    if (!g_config.useDeparturesMqtt())
+    {
+        // Initialize departures provider based on configuration
+        DeparturesProvider* departuresProvider = nullptr;
+        if (g_config.departuresApiProvider() == Configuration::DeparturesApiProvider::Bkk)
+        {
+            // Use busStopId if available, otherwise fall back to trainStopId
+            // TODO: In future, BkkDeparturesProvider should accept separate bus/train stop IDs
+            const char* stopId = g_config.busStopId()[0] != '\0' ? g_config.busStopId() : g_config.trainStopId();
+            Serial.printf("[DATA][INIT] BKK stop selected='%s' (bus='%s' train='%s')\n",
+                          stopId,
+                          g_config.busStopId(),
+                          g_config.trainStopId());
+            departuresProvider = new BkkDeparturesProvider(g_config.bkkApiKey(), stopId);
+            Serial.println("[DATA] Departures provider: BKK");
+        }
+
+        if (departuresProvider)
+        {
+            g_departuresManager.init(departuresProvider, 10000); // 10 second interval
+        }
+        else
+        {
+            Serial.println("[DATA][INIT] No departures provider created for DirectAPI");
+        }
     }
 }
 
 void dataSourceManagerStart()
 {
-    if (s_mode == Configuration::DataSourceMode::Mqtt)
+    Serial.printf("[DATA][START] weatherSource=%s departuresSource=%s\n",
+                  g_config.useWeatherMqtt() ? "MQTT" : "DirectAPI",
+                  g_config.useDeparturesMqtt() ? "MQTT" : "DirectAPI");
+
+    // If both use MQTT, start MQTT task only
+    if (g_config.useWeatherMqtt() && g_config.useDeparturesMqtt())
     {
+        Serial.println("[DATA][START] Starting MQTT task only");
         mqttTaskStart();
         return;
     }
 
-    xTaskCreatePinnedToCore(
-        directApiTask,
-        "DirectApiTask",
-        8192,
-        nullptr,
-        1,
-        nullptr,
-        0);
+    // Start MQTT if either weather or departures use it
+    if (g_config.useWeatherMqtt() || g_config.useDeparturesMqtt())
+    {
+        Serial.println("[DATA][START] Starting MQTT task for mixed mode");
+        mqttTaskStart();
+    }
+
+    // Start managers for DirectAPI providers
+    if (!g_config.useWeatherMqtt())
+    {
+        Serial.println("[DATA][START] Starting WeatherManager task");
+        g_weatherManager.start();
+    }
+
+    if (!g_config.useDeparturesMqtt())
+    {
+        Serial.println("[DATA][START] Starting DeparturesManager task");
+        g_departuresManager.start();
+    }
+
+    // Start monitoring task if either uses DirectAPI
+    if (!g_config.useWeatherMqtt() || !g_config.useDeparturesMqtt())
+    {
+        Serial.println("[DATA][START] Starting DirectApi monitor task");
+        xTaskCreatePinnedToCore(
+            directApiTask,
+            "DirectApiMonitor",
+            4096,
+            nullptr,
+            1,
+            nullptr,
+            0);
+    }
 }
 
 bool dataSourceManagerIsConnected()
 {
-    if (s_mode == Configuration::DataSourceMode::Mqtt)
+    bool directConnected = false;
+    taskENTER_CRITICAL(&s_stateMux);
+    directConnected = s_connected;
+    taskEXIT_CRITICAL(&s_stateMux);
+
+    const bool mqttEnabled = g_config.useWeatherMqtt() || g_config.useDeparturesMqtt();
+    const bool directEnabled = !g_config.useWeatherMqtt() || !g_config.useDeparturesMqtt();
+
+    if (mqttEnabled && directEnabled)
+    {
+        return mqttManagerIsConnected() && directConnected;
+    }
+    if (mqttEnabled)
     {
         return mqttManagerIsConnected();
     }
-
-    bool connected = false;
-    taskENTER_CRITICAL(&s_stateMux);
-    connected = s_connected;
-    taskEXIT_CRITICAL(&s_stateMux);
-    return connected;
+    return directConnected;
 }
 
 bool dataSourceManagerGetLastUpdateTime(struct tm* outTime)
 {
-    if (s_mode == Configuration::DataSourceMode::Mqtt)
+    const bool mqttOnly = g_config.useWeatherMqtt() && g_config.useDeparturesMqtt();
+    if (mqttOnly)
     {
         return mqttManagerGetLastUpdateTime(outTime);
     }
