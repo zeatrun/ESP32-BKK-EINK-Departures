@@ -51,62 +51,166 @@ It is designed for low-noise updates on e-paper and for robust operation with re
 
 ## Software Architecture (Current)
 
-The diagram below shows the current runtime architecture with independent source selection for weather and departures.
+The firmware is organized into layers. The key design rule is that all data (MQTT or Direct API) is normalized through a common data layer before rendering.
+
+### Layered view
 
 ```mermaid
-flowchart LR
-	subgraph Device[ESP32 Firmware]
-		Boot[main.cpp setup]
-		Cfg[Configuration/NVS]
-		Wifi[WiFi Manager Task]
+flowchart TD
+	subgraph L0[Boot and Runtime Configuration]
+		MAIN[main.cpp]
+		STARTUP[StartupManager]
+		CONF[Configuration + NVS + Config Portal]
+	end
+
+	subgraph L1[Connectivity and Time]
+		WIFI[WiFi Manager Task]
+		TIME[Time Manager Task]
+	end
+
+	subgraph L2[Source Orchestration]
 		DSM[Data Source Manager]
+	end
+
+	subgraph L3[Ingress Paths]
 		MQTT[Mqtt Manager Task]
-		WMgr[Weather Manager Task]
-		DMgr[Departures Manager Task]
-		WProv[OpenMeteo Weather Provider]
-		DProv[BKK Departures Provider]
-		Layer[(Common Data Layer\nmutex protected)]
-		Disp[Display Manager Task]
-		Time[Time Manager Task]
+		WMGR[Weather Manager Task]
+		DMGR[Departures Manager Task]
 	end
 
-	subgraph External[External Services]
-		Broker[(MQTT Broker)]
-		OM[Open-Meteo API]
-		BKK[BKK API]
+	subgraph L4[Provider Abstraction]
+		WPROV[WeatherProvider interface]
+		DPROV[DeparturesProvider interface]
+		OM[OpenMeteoWeatherProvider]
+		BKK[BkkDeparturesProvider]
 	end
 
-	Boot --> Cfg
-	Boot --> Wifi
-	Boot --> DSM
-	Boot --> Disp
-	Boot --> Time
+	subgraph L5[Common Data and Render]
+		DL[DataLayer]
+		GLOB[(g_weatherData + g_departuresData\nmutex protected)]
+		DISP[Display Manager Task]
+	end
 
-	Wifi --> DSM
+	subgraph EXT[External Systems]
+		BROKER[(MQTT Broker)]
+		OMAPI[(Open-Meteo API)]
+		BKKAPI[(BKK API)]
+	end
 
-	DSM -->|weather source = MQTT| MQTT
-	DSM -->|departures source = MQTT| MQTT
-	DSM -->|weather source = Direct API| WMgr
-	DSM -->|departures source = Direct API| DMgr
+	MAIN --> STARTUP
+	MAIN --> CONF
+	MAIN --> WIFI
+	MAIN --> DSM
+	MAIN --> TIME
 
-	MQTT <--> Broker
-	MQTT --> Layer
+	WIFI --> DSM
+	CONF --> DSM
 
-	WMgr --> WProv
-	WProv <--> OM
-	WMgr --> Layer
+	DSM --> MQTT
+	DSM --> WMGR
+	DSM --> DMGR
 
-	DMgr --> DProv
-	DProv <--> BKK
-	DMgr --> Layer
+	MQTT <--> BROKER
+	WMGR --> WPROV --> OM --> OMAPI
+	DMGR --> DPROV --> BKK --> BKKAPI
 
-	Layer --> Disp
+	MQTT --> DL
+	WMGR --> DL
+	DMGR --> DL
+
+	DL --> GLOB
+	DL --> DISP
+	TIME --> DISP
+```
+
+### Runtime communication modes
+
+- Weather path and departures path are selected independently.
+- Supported modes: MQTT-only, Direct-API-only, and mixed mode.
+- In mixed mode the Data Source Manager starts both selected ingress paths.
+- `mqtt_manager` has a guard that idles/disconnects when both channels are set to Direct API.
+
+### Module API contracts (who calls what)
+
+#### Boot and orchestration APIs
+
+- `main.cpp` -> `StartupManager::detect()`
+- `main.cpp` -> `Configuration::load()`
+- `main.cpp` -> `wifiManagerInit(...)`, `wifiTaskStart()`
+- `main.cpp` -> `dataSourceManagerInit(...)`, `dataSourceManagerStart()`
+- `main.cpp` -> `timeManagerInit(...)`, `timeManagerStart()`
+
+#### Data source routing APIs
+
+- `data_source_manager` reads `Configuration` getters:
+	- `useWeatherMqtt()` / `useDeparturesMqtt()`
+	- `weatherApiProvider()` / `departuresApiProvider()`
+	- `locationName()`, `timezone()`, `busStopId()`, `trainStopId()`, `bkkApiKey()`
+- If MQTT is enabled for any channel:
+	- `mqttManagerInit(...)`
+	- `mqttTaskStart()`
+- If Direct API weather is enabled:
+	- instantiate `OpenMeteoWeatherProvider`
+	- `g_weatherManager.init(provider, interval)`
+	- `g_weatherManager.start()`
+- If Direct API departures is enabled:
+	- instantiate `BkkDeparturesProvider`
+	- `g_departuresManager.init(provider, interval)`
+	- `g_departuresManager.start()`
+
+#### Provider abstraction APIs
+
+- Weather provider contract:
+	- `WeatherProvider::fetchWeather(WeatherData&)`
+	- `WeatherProvider::providerName()`
+- Departures provider contract:
+	- `DeparturesProvider::fetchDepartures(Departure* buses, int& busCount, Departure* trains, int& trainCount)`
+	- `DeparturesProvider::providerName()`
+
+#### Common data layer APIs
+
+- MQTT path -> `g_dataLayer.applyWeather(...)`, `g_dataLayer.applyDepartures(...)`
+- Direct API managers -> `g_dataLayer.applyWeather(...)`, `g_dataLayer.applyDepartures(...)`
+- `DataLayer` responsibilities:
+	- lock shared structs with mutexes
+	- compare incoming payload with current state
+	- update globals only once per payload
+	- call `displayNotifyDataChanged()` on effective change
+
+#### Display APIs
+
+- Display task startup:
+	- `displayBegin()`
+	- `displayTaskStart()`
+- Change notification from data layer:
+	- `displayNotifyDataChanged()`
+- Rendering uses shared global weather/departures state under mutex.
+
+### Sequence overview (normal mode)
+
+```mermaid
+sequenceDiagram
+	participant Main as main.cpp
+	participant Conf as Configuration
+	participant Wifi as WiFi Task
+	participant DSM as DataSourceManager
+	participant In as MQTT/Direct Managers
+	participant DL as DataLayer
+	participant Disp as Display Task
+
+	Main->>Conf: load()
+	Main->>Wifi: wifiTaskStart()
+	Main->>DSM: dataSourceManagerInit/start()
+	DSM->>In: start selected source tasks
+	In->>DL: applyWeather/applyDepartures
+	DL->>Disp: displayNotifyDataChanged()
+	Disp->>Disp: render from global state
 ```
 
 Notes:
 - Weather and departures can run in mixed mode (one on MQTT, the other on Direct API).
-- Configuration page values are stored in NVS and reloaded at boot.
-- Display reads from shared data and redraws on notify + periodic refresh policy.
+- Configuration values are persisted to NVS and reloaded at boot.
+- Providers parse external formats into common internal structs before they reach the display layer.
 
 ## Configuration
 
