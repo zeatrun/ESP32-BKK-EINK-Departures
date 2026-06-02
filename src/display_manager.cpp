@@ -1208,8 +1208,15 @@ void displayLineData(const Departure* departures, int count, int x, int y, uint1
             drawStringUtf8(routeText, textX, bottomLineY, 12);
         }
 
-        char etaText[6] = {0};
-        displayutil::formatDepartureTime(departures[i].timestamp, etaText, sizeof(etaText));
+        char etaText[8] = {0};
+        if (departures[i].timestamp > 0UL)
+        {
+            displayutil::formatDepartureTime(departures[i].timestamp, etaText, sizeof(etaText));
+        }
+        else
+        {
+            displayutil::formatDepartureEtaMinutes(departures[i].minutes, etaText, sizeof(etaText));
+        }
 
         g_epaper.setTextSize(2);
         g_epaper.setTextColor(EINK_BLACK, EINK_WHITE, true);

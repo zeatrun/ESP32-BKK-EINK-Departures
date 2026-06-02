@@ -6,6 +6,58 @@
 #include <cstring>
 #include <cctype>
 
+namespace
+{
+constexpr int MAX_REASONABLE_DEPARTURE_MINUTES = 180; // 3 hours
+
+int64_t normalizeEpochMs(int64_t value)
+{
+    if (value <= 0)
+    {
+        return 0;
+    }
+
+    // Heuristic: epoch seconds are ~1e9, epoch milliseconds are ~1e12.
+    if (value < 100000000000LL)
+    {
+        return value * 1000LL;
+    }
+
+    return value;
+}
+
+void sanitizeHeadsign(const char* rawHeadsign, char* out, size_t outSize)
+{
+    if (out == nullptr || outSize == 0)
+    {
+        return;
+    }
+
+    out[0] = '\0';
+    if (rawHeadsign == nullptr)
+    {
+        return;
+    }
+
+    const char* start = rawHeadsign;
+    // Some feeds prefix destination with time like "15:33 Esztergom".
+    if (isdigit(static_cast<unsigned char>(start[0]))
+        && isdigit(static_cast<unsigned char>(start[1]))
+        && start[2] == ':'
+        && isdigit(static_cast<unsigned char>(start[3]))
+        && isdigit(static_cast<unsigned char>(start[4])))
+    {
+        start += 5;
+        while (*start == ' ' || *start == '-' || *start == '|')
+        {
+            ++start;
+        }
+    }
+
+    strlcpy(out, start, outSize);
+}
+}
+
 BkkDeparturesProvider::BkkDeparturesProvider(const char* apiKey, const char* stopId)
 {
     if (apiKey != nullptr)
@@ -144,7 +196,10 @@ bool BkkDeparturesProvider::parseBkkResponse(
     JsonObject trips = references["trips"];
     JsonObject routes = references["routes"];
     JsonObject stops = references["stops"];
-    unsigned long currentTimeMs = doc["currentTime"] | millis();
+    int64_t currentTimeMsRaw = doc["currentTime"].is<int64_t>()
+                                   ? doc["currentTime"].as<int64_t>()
+                                   : static_cast<int64_t>(millis());
+    const int64_t currentTimeMs = normalizeEpochMs(currentTimeMsRaw);
 
     // Parse each stop time
     for (JsonObject stopTime : stopTimes)
@@ -155,17 +210,35 @@ bool BkkDeparturesProvider::parseBkkResponse(
         }
 
         // Get departure time (predictedDepartureTime preferred, fallback to departureTime)
-        long depTimeMs = stopTime["predictedDepartureTime"] | stopTime["departureTime"];
+        int64_t depTimeMs = 0;
+        if (stopTime["predictedDepartureTime"].is<int64_t>())
+        {
+            depTimeMs = stopTime["predictedDepartureTime"].as<int64_t>();
+        }
+        else if (stopTime["departureTime"].is<int64_t>())
+        {
+            depTimeMs = stopTime["departureTime"].as<int64_t>();
+        }
+
+        depTimeMs = normalizeEpochMs(depTimeMs);
+
         if (depTimeMs == 0)
         {
             continue; // No departure time
         }
 
         // Calculate minutes to departure
-        long minutesToDep = (depTimeMs - currentTimeMs) / (60 * 1000);
+        int64_t minutesToDep = (depTimeMs - currentTimeMs) / (60LL * 1000LL);
         if (minutesToDep < 0)
         {
             minutesToDep = 0;
+        }
+
+        if (minutesToDep > MAX_REASONABLE_DEPARTURE_MINUTES)
+        {
+            Serial.printf("[BKK] Skipping unrealistic departure: minutes=%lld\n",
+                          static_cast<long long>(minutesToDep));
+            continue;
         }
 
         // Get trip and route info
@@ -183,9 +256,15 @@ bool BkkDeparturesProvider::parseBkkResponse(
 
         const char* shortName = route["shortName"];
         const char* description = route["description"];
-        const char* headsign = stopTime["stopHeadsign"];
+        const char* stopHeadsign = stopTime["stopHeadsign"];
+        const char* tripHeadsign = trip["tripHeadsign"];
 
-        if (!shortName || !headsign)
+        char cleanHeadsign[72] = {0};
+        sanitizeHeadsign((tripHeadsign && tripHeadsign[0] != '\0') ? tripHeadsign : stopHeadsign,
+                         cleanHeadsign,
+                         sizeof(cleanHeadsign));
+
+        if (!shortName || cleanHeadsign[0] == '\0')
             continue;
 
         // Get stop name
@@ -201,18 +280,18 @@ bool BkkDeparturesProvider::parseBkkResponse(
         Departure dep = {};
         strlcpy(dep.line, shortName, sizeof(dep.line));
         strlcpy(dep.routeIdText, description ? description : "", sizeof(dep.routeIdText));
-        strlcpy(dep.destination, headsign, sizeof(dep.destination));
+        strlcpy(dep.destination, cleanHeadsign, sizeof(dep.destination));
         strlcpy(dep.stopName, stopName, sizeof(dep.stopName));
         dep.minutes = static_cast<int>(minutesToDep);
-        dep.timestamp = static_cast<unsigned long>(depTimeMs / 1000);
+        dep.timestamp = static_cast<unsigned long>(depTimeMs / 1000LL);
 
         if (isTrainRoute(shortName, description))
         {
             if (outTrainCount < MAX_DEPARTURES)
             {
                 outTrains[outTrainCount++] = dep;
-                Serial.printf("[BKK] Added train: %s -> %s in %ld min\n",
-                              shortName, headsign, minutesToDep);
+                Serial.printf("[BKK] Added train: %s -> %s in %d min\n",
+                              shortName, cleanHeadsign, dep.minutes);
             }
         }
         else
@@ -220,8 +299,8 @@ bool BkkDeparturesProvider::parseBkkResponse(
             if (outBusCount < MAX_DEPARTURES)
             {
                 outBuses[outBusCount++] = dep;
-                Serial.printf("[BKK] Added bus: %s -> %s in %ld min\n",
-                              shortName, headsign, minutesToDep);
+                Serial.printf("[BKK] Added bus: %s -> %s in %d min\n",
+                              shortName, cleanHeadsign, dep.minutes);
             }
         }
     }

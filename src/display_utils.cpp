@@ -106,6 +106,28 @@ void formatDepartureTime(unsigned long unixTimestamp, char* out, size_t outSize)
     snprintf(out, outSize, "%02d:%02d", departureTime.tm_hour, departureTime.tm_min);
 }
 
+void formatDepartureEtaMinutes(int minutes, char* out, size_t outSize)
+{
+    if (out == nullptr || outSize < 4)
+    {
+        return;
+    }
+
+    if (minutes < 0)
+    {
+        strlcpy(out, "?m", outSize);
+        return;
+    }
+
+    if (minutes > 999)
+    {
+        strlcpy(out, "999+", outSize);
+        return;
+    }
+
+    snprintf(out, outSize, "%dm", minutes);
+}
+
 void formatTempWithDegree(float tempValue, bool valid, char* out, size_t outSize)
 {
     if (out == nullptr || outSize == 0)

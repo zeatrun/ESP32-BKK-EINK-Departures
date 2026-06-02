@@ -5,6 +5,7 @@
 
 namespace
 {
+constexpr uint32_t WEATHER_SUCCESS_INTERVAL_MS = 120000; // 2 minutes after successful update
 constexpr uint32_t WEATHER_RETRY_INTERVAL_MS = 15000; // Fast retry after failure
 }
 
@@ -129,7 +130,7 @@ void WeatherManager::taskLoop()
     {
         uint32_t nowMs = millis();
         uint32_t elapsedMs = nowMs - lastFetchMs;
-        const uint32_t targetInterval = m_connected ? m_intervalMs : WEATHER_RETRY_INTERVAL_MS;
+        const uint32_t targetInterval = m_connected ? WEATHER_SUCCESS_INTERVAL_MS : WEATHER_RETRY_INTERVAL_MS;
 
         if (elapsedMs >= targetInterval)
         {

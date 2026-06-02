@@ -3,6 +3,11 @@
 #include <freertos/portmacro.h>
 #include <WiFi.h>
 
+namespace
+{
+constexpr uint32_t DEPARTURES_SUCCESS_INTERVAL_MS = 120000; // 2 minutes after successful update
+}
+
 DeparturesManager g_departuresManager;
 
 DeparturesManager::~DeparturesManager()
@@ -125,11 +130,14 @@ void DeparturesManager::taskLoop()
     {
         uint32_t nowMs = millis();
         uint32_t elapsedMs = nowMs - lastFetchMs;
+        const uint32_t targetInterval = m_connected ? DEPARTURES_SUCCESS_INTERVAL_MS : m_intervalMs;
 
-        if (elapsedMs >= m_intervalMs)
+        if (elapsedMs >= targetInterval)
         {
-            Serial.printf("[DEPARTURES_MANAGER] Trigger fetch. elapsed=%lu ms\n",
-                          static_cast<unsigned long>(elapsedMs));
+            Serial.printf("[DEPARTURES_MANAGER] Trigger fetch. elapsed=%lu ms target=%lu ms connected=%s\n",
+                          static_cast<unsigned long>(elapsedMs),
+                          static_cast<unsigned long>(targetInterval),
+                          m_connected ? "true" : "false");
             fetchNow();
             lastFetchMs = nowMs;
         }
