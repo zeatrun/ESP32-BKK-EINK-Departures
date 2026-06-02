@@ -1,9 +1,10 @@
 #include "display_manager.h"
 #include "displaySprites.h"
+#include "display_utils.h"
 
 #include "driver.h"
 #include "TFT_eSPI.h"
-#include "mqtt_manager.h"
+#include "data_source_manager.h"
 #include "weather.h"
 #include <qrcode.h>
 
@@ -18,42 +19,6 @@ static TaskHandle_t g_displayTaskHandle = nullptr;
 constexpr uint32_t DISPLAY_NOTIFY_DATA   = (1UL << 0);
 constexpr uint32_t DISPLAY_NOTIFY_STATUS = (1UL << 1);
 constexpr uint32_t DISPLAY_DATA_REFRESH_INTERVAL_MS = 10UL * 60UL * 1000UL;
-
-static void drawSprite(int x,
-                       int y,
-                       const uint16_t* rows,
-                       int width,
-                       int height,
-                       int scale,
-                       uint16_t color)
-{
-    if (rows == nullptr || width <= 0 || height <= 0 || scale <= 0)
-    {
-        return;
-    }
-
-    for (int row = 0; row < height; ++row)
-    {
-        uint16_t bits = rows[row];
-        for (int col = 0; col < width; ++col)
-        {
-            const uint16_t mask = static_cast<uint16_t>(1U << (width - 1 - col));
-            if ((bits & mask) == 0)
-            {
-                continue;
-            }
-
-            if (scale == 1)
-            {
-                g_epaper.drawPixel(x + col, y + row, color);
-            }
-            else
-            {
-                g_epaper.fillRect(x + (col * scale), y + (row * scale), scale, scale, color);
-            }
-        }
-    }
-}
 
 static void drawSleepingIcon(int centerX, int centerY, const uint16_t *spriteRows, uint16_t spriteColor)
 {
@@ -216,7 +181,7 @@ static void drawTopRightStatus()
     struct tm updateTime = {};
     char mqttTimeStr[6] = "xx:xx";
 
-    if (mqttManagerGetLastUpdateTime(&updateTime))
+    if (dataSourceManagerGetLastUpdateTime(&updateTime))
     {
         snprintf(mqttTimeStr, sizeof(mqttTimeStr), "%02d:%02d", updateTime.tm_hour, updateTime.tm_min);
     }
@@ -226,7 +191,7 @@ static void drawTopRightStatus()
     g_epaper.setTextColor(EINK_BLACK, EINK_WHITE, true);
     g_epaper.drawString(mqttTimeStr, mqttTimeX, mqttTimeY);
 
-    const uint16_t dotColor = mqttManagerIsConnected() ? EINK_GREEN : EINK_RED;
+    const uint16_t dotColor = dataSourceManagerIsConnected() ? EINK_GREEN : EINK_RED;
     g_epaper.fillCircle(dotX, dotY, dotRadius, dotColor);
     g_epaper.drawCircle(dotX, dotY, dotRadius, EINK_BLACK);
 }
@@ -270,86 +235,6 @@ static void drawClockIcon(int centerX, int centerY, uint16_t color)
     g_epaper.drawLine(centerX, centerY, centerX + 3, centerY + 2, color);
 }
 
-static void formatDepartureTime(unsigned long unixTimestamp, char* out, size_t outSize)
-{
-    if (out == nullptr || outSize < 6)
-    {
-        return;
-    }
-
-    strlcpy(out, "xx:xx", outSize);
-
-    if (unixTimestamp == 0)
-    {
-        return;
-    }
-
-    const time_t departureTs = static_cast<time_t>(unixTimestamp);
-    struct tm departureTime = {};
-    if (localtime_r(&departureTs, &departureTime) == nullptr)
-    {
-        return;
-    }
-
-    snprintf(out, outSize, "%02d:%02d", departureTime.tm_hour, departureTime.tm_min);
-}
-
-static void formatTempWithDegree(float tempValue, bool valid, char* out, size_t outSize)
-{
-    if (out == nullptr || outSize == 0)
-    {
-        return;
-    }
-
-    if (!valid)
-    {
-        strlcpy(out, "xx\u00b0", outSize);
-        return;
-    }
-
-    snprintf(out, outSize, "%.0f\u00b0", tempValue);
-}
-
-static void drawArrowIcon(int x, int y, bool up, uint16_t color)
-{
-    if (up)
-    {
-        g_epaper.drawLine(x + 3, y + 7, x + 3, y + 1, color);
-        g_epaper.drawLine(x + 3, y + 1, x + 1, y + 3, color);
-        g_epaper.drawLine(x + 3, y + 1, x + 5, y + 3, color);
-    }
-    else
-    {
-        g_epaper.drawLine(x + 3, y + 1, x + 3, y + 7, color);
-        g_epaper.drawLine(x + 3, y + 7, x + 1, y + 5, color);
-        g_epaper.drawLine(x + 3, y + 7, x + 5, y + 5, color);
-    }
-}
-
-static void drawArrowIconScaled(int x, int y, bool up, uint16_t color, int scale)
-{
-    if (scale <= 1)
-    {
-        drawArrowIcon(x, y, up, color);
-        return;
-    }
-
-    auto sx = [x, scale](int v) { return x + (v * scale); };
-    auto sy = [y, scale](int v) { return y + (v * scale); };
-
-    if (up)
-    {
-        g_epaper.drawLine(sx(3), sy(7), sx(3), sy(1), color);
-        g_epaper.drawLine(sx(3), sy(1), sx(1), sy(3), color);
-        g_epaper.drawLine(sx(3), sy(1), sx(5), sy(3), color);
-    }
-    else
-    {
-        g_epaper.drawLine(sx(3), sy(1), sx(3), sy(7), color);
-        g_epaper.drawLine(sx(3), sy(7), sx(1), sy(5), color);
-        g_epaper.drawLine(sx(3), sy(7), sx(5), sy(5), color);
-    }
-}
 
 static void drawWeatherMetricsRow(int cardX,
                                   int cardW,
@@ -409,13 +294,14 @@ static void drawWeatherMetricsRow(int cardX,
     const int precipBlockWidth = SPRITE_WEATHER_ICON_WIDTH + 2 + precipTextWidth;
     const int precipStartX = cardX + ((cardW - precipBlockWidth) / 2);
 
-    drawSprite(precipStartX,
-               topY + 2,
-               SPRITE_UMBRELLA_8X8,
-               SPRITE_WEATHER_ICON_WIDTH,
-               SPRITE_WEATHER_ICON_HEIGHT,
-               1,
-               textColor);
+    displayutil::drawMonochromeSprite(g_epaper,
+                                      precipStartX,
+                                      topY + 2,
+                                      SPRITE_UMBRELLA_8X8,
+                                      SPRITE_WEATHER_ICON_WIDTH,
+                                      SPRITE_WEATHER_ICON_HEIGHT,
+                                      1,
+                                      textColor);
     g_epaper.drawString(precipText, precipStartX + SPRITE_WEATHER_ICON_WIDTH + 2, topY);
 
     if (precipOnly)
@@ -432,22 +318,24 @@ static void drawWeatherMetricsRow(int cardX,
     const int humidityBlockWidth = SPRITE_WEATHER_ICON_WIDTH + 2 + humidityTextWidth;
     const int humidityStartX = cardX + halfW + ((halfW - humidityBlockWidth) / 2);
 
-    drawSprite(windStartX,
-               bottomY + 7,
-               SPRITE_WIND_8X8,
-               SPRITE_WEATHER_ICON_WIDTH,
-               SPRITE_WEATHER_ICON_HEIGHT,
-               1,
-               textColor);
+    displayutil::drawMonochromeSprite(g_epaper,
+                                      windStartX,
+                                      bottomY + 7,
+                                      SPRITE_WIND_8X8,
+                                      SPRITE_WEATHER_ICON_WIDTH,
+                                      SPRITE_WEATHER_ICON_HEIGHT,
+                                      1,
+                                      textColor);
     g_epaper.drawString(windText, windStartX + SPRITE_WEATHER_ICON_WIDTH + 2, bottomY + 5);
 
-    drawSprite(humidityStartX,
-               bottomY + 7,
-               SPRITE_DROP_8X8,
-               SPRITE_WEATHER_ICON_WIDTH,
-               SPRITE_WEATHER_ICON_HEIGHT,
-               1,
-               textColor);
+    displayutil::drawMonochromeSprite(g_epaper,
+                                      humidityStartX,
+                                      bottomY + 7,
+                                      SPRITE_DROP_8X8,
+                                      SPRITE_WEATHER_ICON_WIDTH,
+                                      SPRITE_WEATHER_ICON_HEIGHT,
+                                      1,
+                                      textColor);
     g_epaper.drawString(humidityText, humidityStartX + SPRITE_WEATHER_ICON_WIDTH + 2, bottomY + 5);
 }
 
@@ -535,51 +423,6 @@ static bool drawWifiQrCodeInArea(int x,
     return true;
 }
 
-static void getHungarianWeekdayLabel(const char* isoDate, char* out, size_t outSize)
-{
-    if (out == nullptr || outSize == 0)
-    {
-        return;
-    }
-
-    strlcpy(out, "Nap", outSize);
-
-    if (isoDate == nullptr)
-    {
-        return;
-    }
-
-    int year = 0;
-    int month = 0;
-    int day = 0;
-    if (sscanf(isoDate, "%d-%d-%d", &year, &month, &day) != 3)
-    {
-        return;
-    }
-
-    struct tm dateTm = {};
-    dateTm.tm_year = year - 1900;
-    dateTm.tm_mon = month - 1;
-    dateTm.tm_mday = day;
-    dateTm.tm_isdst = -1;
-
-    if (mktime(&dateTm) == static_cast<time_t>(-1))
-    {
-        return;
-    }
-
-    switch (dateTm.tm_wday)
-    {
-        case 0: strlcpy(out, "Vasárnap", outSize); break;
-        case 1: strlcpy(out, "Hétfő", outSize); break;
-        case 2: strlcpy(out, "Kedd", outSize); break;
-        case 3: strlcpy(out, "Szerda", outSize); break;
-        case 4: strlcpy(out, "Csütörtök", outSize); break;
-        case 5: strlcpy(out, "Péntek", outSize); break;
-        case 6: strlcpy(out, "Szombat", outSize); break;
-        default: break;
-    }
-}
 
 static const char* weatherCodeToHungarianText(int code)
 {
@@ -801,15 +644,15 @@ static void drawWeatherCards(const WeatherData* weather, bool hasWeather)
     char todayMinText[12] = {0};
     char todayStatusText[28] = "Nincs adat";
 
-    formatTempWithDegree(0.0F, false, todayMainText, sizeof(todayMainText));
-    formatTempWithDegree(0.0F, false, todayMaxText, sizeof(todayMaxText));
-    formatTempWithDegree(0.0F, false, todayMinText, sizeof(todayMinText));
+    displayutil::formatTempWithDegree(0.0F, false, todayMainText, sizeof(todayMainText));
+    displayutil::formatTempWithDegree(0.0F, false, todayMaxText, sizeof(todayMaxText));
+    displayutil::formatTempWithDegree(0.0F, false, todayMinText, sizeof(todayMinText));
 
     if (hasWeather && weather != nullptr && hasToday)
     {
-        formatTempWithDegree(weather->temperatureC, true, todayMainText, sizeof(todayMainText));
-        formatTempWithDegree(todayMax, true, todayMaxText, sizeof(todayMaxText));
-        formatTempWithDegree(todayMin, true, todayMinText, sizeof(todayMinText));
+        displayutil::formatTempWithDegree(weather->temperatureC, true, todayMainText, sizeof(todayMainText));
+        displayutil::formatTempWithDegree(todayMax, true, todayMaxText, sizeof(todayMaxText));
+        displayutil::formatTempWithDegree(todayMin, true, todayMinText, sizeof(todayMinText));
         strlcpy(todayStatusText,
                 weatherCodeToHungarianText(weather->weatherCode),
                 sizeof(todayStatusText));
@@ -837,8 +680,8 @@ static void drawWeatherCards(const WeatherData* weather, bool hasWeather)
     g_epaper.setTextSize(4);
     g_epaper.drawString(todayMainText, bigX + 10, mainTempY);
 
-    drawArrowIconScaled(bigX + 112, auxTopY + 1, true, EINK_WHITE, 2);
-    drawArrowIconScaled(bigX + 112, auxBottomY + 20, false, EINK_WHITE, 2);
+    displayutil::drawArrowIconScaled(g_epaper, bigX + 112, auxTopY + 1, true, EINK_WHITE, 2);
+    displayutil::drawArrowIconScaled(g_epaper, bigX + 112, auxBottomY + 20, false, EINK_WHITE, 2);
 
     g_epaper.setTextSize(2);
     g_epaper.drawString(todayMaxText, bigX + 128, auxTopY - 1);
@@ -873,7 +716,7 @@ static void drawWeatherCards(const WeatherData* weather, bool hasWeather)
         }
         else if (hasWeather && weather != nullptr && weather->dailyCount > (i + 1))
         {
-            getHungarianWeekdayLabel(weather->daily[i + 1].date, label, sizeof(label));
+            displayutil::getHungarianWeekdayLabel(weather->daily[i + 1].date, label, sizeof(label));
         }
         else
         {
@@ -900,15 +743,15 @@ static void drawWeatherCards(const WeatherData* weather, bool hasWeather)
         char minTempText[12] = {0};
         char dayStatusText[28] = "Nincs adat";
 
-        formatTempWithDegree(0.0F, false, mainTempText, sizeof(mainTempText));
-        formatTempWithDegree(0.0F, false, maxTempText, sizeof(maxTempText));
-        formatTempWithDegree(0.0F, false, minTempText, sizeof(minTempText));
+        displayutil::formatTempWithDegree(0.0F, false, mainTempText, sizeof(mainTempText));
+        displayutil::formatTempWithDegree(0.0F, false, maxTempText, sizeof(maxTempText));
+        displayutil::formatTempWithDegree(0.0F, false, minTempText, sizeof(minTempText));
 
         if (dayAvailable)
         {
-            formatTempWithDegree(dayMain, true, mainTempText, sizeof(mainTempText));
-            formatTempWithDegree(dayMax, true, maxTempText, sizeof(maxTempText));
-            formatTempWithDegree(dayMin, true, minTempText, sizeof(minTempText));
+            displayutil::formatTempWithDegree(dayMain, true, mainTempText, sizeof(mainTempText));
+            displayutil::formatTempWithDegree(dayMax, true, maxTempText, sizeof(maxTempText));
+            displayutil::formatTempWithDegree(dayMin, true, minTempText, sizeof(minTempText));
             strlcpy(dayStatusText,
                     weatherCodeToHungarianText(weather->daily[i + 1].weatherCode),
                     sizeof(dayStatusText));
@@ -938,8 +781,8 @@ static void drawWeatherCards(const WeatherData* weather, bool hasWeather)
         g_epaper.setTextSize(3);
         g_epaper.drawString(mainTempText, cardX + 6, smallMainTempY);
 
-        drawArrowIcon(cardX + 58, smallAuxTopY, true, EINK_BLACK);
-        drawArrowIcon(cardX + 58, smallAuxBottomY + 6, false, EINK_BLACK);
+        displayutil::drawArrowIcon(g_epaper, cardX + 58, smallAuxTopY, true, EINK_BLACK);
+        displayutil::drawArrowIcon(g_epaper, cardX + 58, smallAuxBottomY + 6, false, EINK_BLACK);
 
         g_epaper.setTextSize(1);
         g_epaper.drawString(maxTempText, cardX + 68, smallAuxTopY);
@@ -1365,8 +1208,15 @@ void displayLineData(const Departure* departures, int count, int x, int y, uint1
             drawStringUtf8(routeText, textX, bottomLineY, 12);
         }
 
-        char etaText[6] = {0};
-        formatDepartureTime(departures[i].timestamp, etaText, sizeof(etaText));
+        char etaText[8] = {0};
+        if (departures[i].timestamp > 0UL)
+        {
+            displayutil::formatDepartureTime(departures[i].timestamp, etaText, sizeof(etaText));
+        }
+        else
+        {
+            displayutil::formatDepartureEtaMinutes(departures[i].minutes, etaText, sizeof(etaText));
+        }
 
         g_epaper.setTextSize(2);
         g_epaper.setTextColor(EINK_BLACK, EINK_WHITE, true);
@@ -1460,24 +1310,26 @@ void displayEmptyBackground()
 
     g_epaper.setRotation(3);
     g_epaper.setTextColor(EINK_BLACK, EINK_YELLOW, true);
-    drawSprite(BUS_SECTION_X + 14,
-               BUS_SECTION_Y + 9,
-               SPRITE_BUS_16X12,
-               SPRITE_ICON_WIDTH,
-               SPRITE_ICON_HEIGHT,
-               1,
-               EINK_BLACK);
+    displayutil::drawMonochromeSprite(g_epaper,
+                                      BUS_SECTION_X + 14,
+                                      BUS_SECTION_Y + 8,
+                                      SPRITE_BUS_16X12,
+                                      SPRITE_ICON_WIDTH,
+                                      SPRITE_ICON_HEIGHT,
+                                      2,
+                                      EINK_BLACK);
     drawStringUtf8("BUSZ INDULÁSOK", BUS_SECTION_X + 36, BUS_SECTION_Y + 8, 32);
 
     g_epaper.setRotation(3);
     g_epaper.setTextColor(EINK_WHITE, EINK_BLUE, true);
-    drawSprite(TRAIN_SECTION_X + 14,
-               TRAIN_SECTION_Y + 9,
-               SPRITE_TRAIN_16X12,
-               SPRITE_ICON_WIDTH,
-               SPRITE_ICON_HEIGHT,
-               1,
-               EINK_WHITE);
+    displayutil::drawMonochromeSprite(g_epaper,
+                                      TRAIN_SECTION_X + 14,
+                                      TRAIN_SECTION_Y + 8,
+                                      SPRITE_TRAIN_16X12,
+                                      SPRITE_ICON_WIDTH,
+                                      SPRITE_ICON_HEIGHT,
+                                      2,
+                                      EINK_BLACK);
     drawStringUtf8("VONAT INDULÁSOK", TRAIN_SECTION_X + 36, TRAIN_SECTION_Y + 8, 32);
 
     g_epaper.setRotation(3);

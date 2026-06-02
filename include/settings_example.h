@@ -8,3 +8,11 @@
 #define SETTINGS_MQTT_PORT 1883
 #define SETTINGS_MQTT_TOPIC_DEPARTURES "bkk/stop"
 #define SETTINGS_MQTT_TOPIC_WEATHER "weather/forecast"
+
+// BKK API (Direct API mode)
+// Get your API key from https://futar.bkk.hu/
+#define SETTINGS_BKK_API_KEY "YOUR_BKK_API_KEY"
+// Example stop IDs:
+//   BKK_005501438_0  - Pilisvorosvar (MAV)
+//   volan_778557_2   - Pilisvorosvar (Volan)
+#define SETTINGS_BKK_STOP_ID "BKK_005501438_0"

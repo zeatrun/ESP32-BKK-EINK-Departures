@@ -11,6 +11,7 @@ MQTT_BKK_TOPIC = "bkk/stop"
 MQTT_WEATHER_TOPIC = "weather/forecast"
 
 # BKK API
+# Get your API key from https://futar.bkk.hu/
 BKK_API_KEY = "YOUR_BKK_API_KEY"
 STOP_ID_MAV = "BKK_005501438_0"
 STOP_ID_VOLAN = "volan_778557_2"

@@ -3,7 +3,7 @@
 #include "startup_manager.h"
 #include "configuration.h"
 #include "wifi_manager.h"
-#include "mqtt_manager.h"
+#include "data_source_manager.h"
 #include "departures.h"
 #include "weather.h"
 #include "display_manager.h"
@@ -54,9 +54,9 @@ void setup()
     wifiManagerInit(s_wifiEventGroup);
     wifiTaskStart();
 
-    // ── MQTT manager ──────────────────────────────────────────────────────────
-    mqttManagerInit(s_wifiEventGroup, espClient, s_clientMutex);
-    mqttTaskStart();
+    // ── Data source manager (MQTT or direct API) ────────────────────────────
+    dataSourceManagerInit(s_wifiEventGroup, espClient, s_clientMutex);
+    dataSourceManagerStart();
 
     // ── Time manager ──────────────────────────────────────────────────────────
     timeManagerInit(s_wifiEventGroup);

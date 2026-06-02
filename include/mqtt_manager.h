@@ -5,13 +5,14 @@
 #include <PubSubClient.h>
 #include <time.h>
 #include "weather.h"
-#include "settings.h"
 
-// Broker settings
-#define MQTT_SERVER SETTINGS_MQTT_SERVER
-#define MQTT_PORT SETTINGS_MQTT_PORT
-#define MQTT_SUB_TOPIC SETTINGS_MQTT_TOPIC_DEPARTURES
-#define MQTT_WEATHER_TOPIC SETTINGS_MQTT_TOPIC_WEATHER
+struct MqttRuntimeConfig
+{
+    const char* server;
+    uint16_t    port;
+    const char* departuresTopic;
+    const char* weatherTopic;
+};
 
 // PubSubClient RX/TX buffer – must fit the largest expected JSON payload
 #define MQTT_BUFFER_SIZE 2048
@@ -29,7 +30,8 @@
  */
 void mqttManagerInit(EventGroupHandle_t connectedEventGroup,
                      WiFiClient&        espClient,
-                     SemaphoreHandle_t  clientMutex);
+                     SemaphoreHandle_t  clientMutex,
+                     const MqttRuntimeConfig& config);
 
 /**
  * Spawn the MQTT management task on Core 0.

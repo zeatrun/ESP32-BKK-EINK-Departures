@@ -1,4 +1,6 @@
 #include "mqtt_manager.h"
+#include "data_layer.h"
+#include "configuration.h"
 #include "departures.h"
 #include "weather.h"
 #include "display_manager.h"
@@ -18,6 +20,8 @@ static time_t             s_lastUpdateTs   = 0;
 static bool               s_seenDeparturePayload = false;
 static bool               s_seenWeatherPayload   = false;
 static bool               s_reportedInitIssue    = false;
+static char               s_departuresTopic[128] = {};
+static char               s_weatherTopic[128]    = {};
 
 constexpr float WEATHER_FLOAT_EPSILON = 0.01F;
 
@@ -55,12 +59,12 @@ static MqttPayloadType getPayloadType(const char* topic)
         return MqttPayloadType::Unknown;
     }
 
-    if (strcmp(topic, MQTT_SUB_TOPIC) == 0)
+    if (strcmp(topic, s_departuresTopic) == 0)
     {
         return MqttPayloadType::Departures;
     }
 
-    if (strcmp(topic, MQTT_WEATHER_TOPIC) == 0)
+    if (strcmp(topic, s_weatherTopic) == 0)
     {
         return MqttPayloadType::Weather;
     }
@@ -186,44 +190,19 @@ static PayloadProcessResult handleDeparturePayload(JsonVariantConst payloadRoot)
         ++cnt;
     }
 
-    if (xSemaphoreTake(g_departuresMutex, pdMS_TO_TICKS(200)) == pdTRUE)
+    if (g_dataLayer.applyDepartures(nextBusDepartures, nextBusCount, nextTrainDepartures, nextTrainCount))
     {
-        const bool busesSame = departuresEqual(g_busDepartures, g_busCount,
-                                               nextBusDepartures, nextBusCount);
-        const bool trainsSame = departuresEqual(g_trainDepartures, g_trainCount,
-                                                nextTrainDepartures, nextTrainCount);
-
-        result.changed = !(busesSame && trainsSame);
         result.applied = true;
-        g_departuresValid = true;
-
-        if (result.changed)
-        {
-            g_busCount   = nextBusCount;
-            g_trainCount = nextTrainCount;
-
-            for (int i = 0; i < g_busCount; ++i)   g_busDepartures[i]   = nextBusDepartures[i];
-            for (int i = g_busCount; i < MAX_DEPARTURES; ++i) g_busDepartures[i] = {};
-
-            for (int i = 0; i < g_trainCount; ++i) g_trainDepartures[i] = nextTrainDepartures[i];
-            for (int i = g_trainCount; i < MAX_DEPARTURES; ++i) g_trainDepartures[i] = {};
-
-            Serial.print("[MQTT] Departures updated: ");
-            Serial.print(g_busCount);
-            Serial.print(" bus(es), ");
-            Serial.print(g_trainCount);
-            Serial.println(" train(s).");
-        }
-        else
-        {
-            Serial.println("[MQTT] No departure change; skipping display refresh.");
-        }
-
-        xSemaphoreGive(g_departuresMutex);
+        result.changed = true;
+        Serial.print("[MQTT] Departures applied via DataLayer: ");
+        Serial.print(nextBusCount);
+        Serial.print(" bus(es), ");
+        Serial.print(nextTrainCount);
+        Serial.println(" train(s).");
     }
     else
     {
-        Serial.println("[MQTT] Could not acquire departures mutex.");
+        Serial.println("[MQTT] DataLayer apply failed for departures.");
     }
 
     return result;
@@ -286,27 +265,15 @@ static PayloadProcessResult handleWeatherPayload(JsonVariantConst payloadRoot)
     }
     nextWeather.dailyCount = dayIndex;
 
-    if (xSemaphoreTake(g_weatherMutex, pdMS_TO_TICKS(200)) == pdTRUE)
+    if (g_dataLayer.applyWeather(nextWeather))
     {
-        result.changed = (!g_weatherValid) || (!weatherEquals(g_weatherData, nextWeather));
         result.applied = true;
-
-        if (result.changed)
-        {
-            g_weatherData = nextWeather;
-            g_weatherValid = true;
-            Serial.println("[MQTT] Weather updated.");
-        }
-        else
-        {
-            Serial.println("[MQTT] No weather change; skipping display refresh.");
-        }
-
-        xSemaphoreGive(g_weatherMutex);
+        result.changed = true;
+        Serial.println("[MQTT] Weather applied via DataLayer.");
     }
     else
     {
-        Serial.println("[MQTT] Could not acquire weather mutex.");
+        Serial.println("[MQTT] DataLayer apply failed for weather.");
     }
 
     return result;
@@ -376,10 +343,8 @@ static void mqttCallback(char* topic, byte* payload, unsigned int length)
         // Status refresh is handled together with the data refresh policy.
     }
 
-    if (changed || initialDataArrival)
-    {
-        displayNotifyDataChanged();
-    }
+    (void)changed;
+    (void)initialDataArrival;
 }
 
 // ── Internal helpers ─────────────────────────────────────────────────────────
@@ -396,8 +361,8 @@ static bool mqttConnect()
     if (s_mqttClient->connect(clientId.c_str()))
     {
         Serial.println("connected.");
-        s_mqttClient->subscribe(MQTT_SUB_TOPIC);
-        s_mqttClient->subscribe(MQTT_WEATHER_TOPIC);
+        s_mqttClient->subscribe(s_departuresTopic);
+        s_mqttClient->subscribe(s_weatherTopic);
         setMqttConnected(true);
         return true;
     }
@@ -414,6 +379,25 @@ static void mqttTask(void* /*pvParameters*/)
 {
     for (;;)
     {
+        // Hard guard: if both channels are DirectAPI, MQTT must stay idle.
+        if (!g_config.useWeatherMqtt() && !g_config.useDeparturesMqtt())
+        {
+            if (s_mqttClient != nullptr && s_clientMutex != nullptr
+                && xSemaphoreTake(s_clientMutex, pdMS_TO_TICKS(50)) == pdTRUE)
+            {
+                if (s_mqttClient->connected())
+                {
+                    s_mqttClient->disconnect();
+                    Serial.println("[MQTT] Disabled by config (DirectAPI for both), disconnected client.");
+                }
+                xSemaphoreGive(s_clientMutex);
+            }
+
+            setMqttConnected(false);
+            vTaskDelay(pdMS_TO_TICKS(1000));
+            continue;
+        }
+
         if (s_wifiEventGroup == nullptr || s_clientMutex == nullptr || s_mqttClient == nullptr)
         {
             if (!s_reportedInitIssue)
@@ -513,18 +497,39 @@ bool mqttManagerGetLastUpdateTime(struct tm* outTime)
 
 void mqttManagerInit(EventGroupHandle_t connectedEventGroup,
                      WiFiClient&        espClient,
-                     SemaphoreHandle_t  clientMutex)
+                     SemaphoreHandle_t  clientMutex,
+                     const MqttRuntimeConfig& config)
 {
     s_wifiEventGroup = connectedEventGroup;
     s_clientMutex    = clientMutex;
 
+    const char* server = (config.server != nullptr && config.server[0] != '\0')
+                         ? config.server
+                         : "127.0.0.1";
+    const uint16_t port = (config.port == 0U) ? 1883U : config.port;
+    const char* departuresTopic = (config.departuresTopic != nullptr && config.departuresTopic[0] != '\0')
+                                  ? config.departuresTopic
+                                  : "bkk/stop";
+    const char* weatherTopic = (config.weatherTopic != nullptr && config.weatherTopic[0] != '\0')
+                               ? config.weatherTopic
+                               : "weather/forecast";
+
+    strlcpy(s_departuresTopic, departuresTopic, sizeof(s_departuresTopic));
+    strlcpy(s_weatherTopic, weatherTopic, sizeof(s_weatherTopic));
+
     // PubSubClient is allocated once here; it will live for the lifetime of the program
     static PubSubClient mqttClient(espClient);
-    mqttClient.setServer(MQTT_SERVER, MQTT_PORT);
+    mqttClient.setServer(server, port);
     mqttClient.setBufferSize(MQTT_BUFFER_SIZE);
     mqttClient.setSocketTimeout(2);
     mqttClient.setCallback(mqttCallback);
     s_mqttClient = &mqttClient;
+
+    Serial.printf("[MQTT] Runtime config: server=%s port=%u depTopic=%s weatherTopic=%s\n",
+                  server,
+                  static_cast<unsigned int>(port),
+                  s_departuresTopic,
+                  s_weatherTopic);
 }
 
 void mqttTaskStart()

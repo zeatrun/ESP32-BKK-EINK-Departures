@@ -9,3 +9,4 @@ include/settings.h
 build_log.txt
 EinkESP32_TransportBoard.code-workspace
 script/settings.py
+script/__pycache__/
