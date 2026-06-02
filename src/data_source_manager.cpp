@@ -446,7 +446,7 @@ void dataSourceManagerInit(EventGroupHandle_t connectedEventGroup,
                           stopId,
                           g_config.busStopId(),
                           g_config.trainStopId());
-            departuresProvider = new BkkDeparturesProvider(g_config.bkkApiKey(), stopId);
+            departuresProvider = new BkkDeparturesProvider(g_config.bkkApiKey(), g_config.busStopId(), g_config.trainStopId());
             Serial.println("[DATA] Departures provider: BKK");
         }
 

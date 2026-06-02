@@ -24,6 +24,7 @@ public:
      * @param stopId   Stop ID (e.g., "BKK_005501438_0")
      */
     BkkDeparturesProvider(const char* apiKey, const char* stopId);
+    BkkDeparturesProvider(const char* apiKey, const char* busStopId, const char* trainStopId);
 
     /**
      * Fetch departures from BKK API for the configured stop.
@@ -39,10 +40,19 @@ public:
      * Update the stop ID (allows switching stops at runtime).
      */
     void setStopId(const char* stopId);
+    void setBusStopId(const char* stopId);
+    void setTrainStopId(const char* stopId);
 
 private:
     char m_apiKey[128];
-    char m_stopId[64];
+    char m_busStopId[64];
+    char m_trainStopId[64];
+
+    bool fetchForStop(const char* stopId,
+                      Departure* outBuses,
+                      int& outBusCount,
+                      Departure* outTrains,
+                      int& outTrainCount);
 
     /**
      * Parse BKK API JSON response into departures arrays.

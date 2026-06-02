@@ -40,8 +40,8 @@ void DeparturesManager::start()
 
     m_running = true;
     const char taskName[] = "departures";
-    // HTTPS + JSON parsing for BKK can require more stack on ESP32.
-    const uint32_t stackSize = 12288;
+    // HTTPS + JSON parsing for BKK can require a larger stack on ESP32.
+    const uint32_t stackSize = 16384;
     const UBaseType_t priority = tskIDLE_PRIORITY + 2; // Higher priority than weather
 
     if (xTaskCreate(taskEntry, taskName, stackSize, this, priority, &m_taskHandle) != pdPASS)

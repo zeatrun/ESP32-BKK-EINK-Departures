@@ -10,6 +10,12 @@ namespace
 {
 constexpr int MAX_REASONABLE_DEPARTURE_MINUTES = 180; // 3 hours
 
+// Static scratch buffers to avoid large stack allocations in fetchDepartures.
+Departure s_busStopBuses[MAX_DEPARTURES] = {};
+Departure s_busStopTrains[MAX_DEPARTURES] = {};
+Departure s_trainStopBuses[MAX_DEPARTURES] = {};
+Departure s_trainStopTrains[MAX_DEPARTURES] = {};
+
 int64_t normalizeEpochMs(int64_t value)
 {
     if (value <= 0)
@@ -66,7 +72,24 @@ BkkDeparturesProvider::BkkDeparturesProvider(const char* apiKey, const char* sto
     }
     if (stopId != nullptr)
     {
-        strlcpy(m_stopId, stopId, sizeof(m_stopId));
+        strlcpy(m_busStopId, stopId, sizeof(m_busStopId));
+        strlcpy(m_trainStopId, stopId, sizeof(m_trainStopId));
+    }
+}
+
+BkkDeparturesProvider::BkkDeparturesProvider(const char* apiKey, const char* busStopId, const char* trainStopId)
+{
+    if (apiKey != nullptr)
+    {
+        strlcpy(m_apiKey, apiKey, sizeof(m_apiKey));
+    }
+    if (busStopId != nullptr)
+    {
+        strlcpy(m_busStopId, busStopId, sizeof(m_busStopId));
+    }
+    if (trainStopId != nullptr)
+    {
+        strlcpy(m_trainStopId, trainStopId, sizeof(m_trainStopId));
     }
 }
 
@@ -74,17 +97,43 @@ void BkkDeparturesProvider::setStopId(const char* stopId)
 {
     if (stopId != nullptr)
     {
-        strlcpy(m_stopId, stopId, sizeof(m_stopId));
+        strlcpy(m_busStopId, stopId, sizeof(m_busStopId));
+        strlcpy(m_trainStopId, stopId, sizeof(m_trainStopId));
     }
 }
 
-bool BkkDeparturesProvider::fetchDepartures(
-    Departure* outBuses, int& outBusCount,
-    Departure* outTrains, int& outTrainCount)
+void BkkDeparturesProvider::setBusStopId(const char* stopId)
 {
-    if (strlen(m_apiKey) == 0 || strlen(m_stopId) == 0)
+    if (stopId != nullptr)
     {
-        Serial.println("[BKK] API key or stop ID not configured");
+        strlcpy(m_busStopId, stopId, sizeof(m_busStopId));
+    }
+}
+
+void BkkDeparturesProvider::setTrainStopId(const char* stopId)
+{
+    if (stopId != nullptr)
+    {
+        strlcpy(m_trainStopId, stopId, sizeof(m_trainStopId));
+    }
+}
+
+bool BkkDeparturesProvider::fetchForStop(const char* stopId,
+                                         Departure* outBuses,
+                                         int& outBusCount,
+                                         Departure* outTrains,
+                                         int& outTrainCount)
+{
+    if (stopId == nullptr || stopId[0] == '\0')
+    {
+        outBusCount = 0;
+        outTrainCount = 0;
+        return false;
+    }
+
+    if (strlen(m_apiKey) == 0)
+    {
+        Serial.println("[BKK] API key not configured");
         outBusCount = 0;
         outTrainCount = 0;
         return false;
@@ -96,18 +145,18 @@ bool BkkDeparturesProvider::fetchDepartures(
     const bool hasKey = keyLen > 0;
     const char* keyTail = hasKey && keyLen > 4 ? (m_apiKey + keyLen - 4) : m_apiKey;
     Serial.printf("[BKK] Request config: stopId='%s' keyLen=%u keyTail='%s'\n",
-                  m_stopId,
+                  stopId,
                   static_cast<unsigned int>(keyLen),
                   hasKey ? keyTail : "");
 
     // Build BKK API URL
     String url = "https://futar.bkk.hu/api/query/v1/ws/otp/api/where/arrivals-and-departures-for-stop.json?";
     url += "stopId=";
-    url += m_stopId;
+    url += stopId;
     url += "&key=";
     url += m_apiKey;
 
-    Serial.printf("[BKK] Fetching from endpoint for stopId='%s'\n", m_stopId);
+    Serial.printf("[BKK] Fetching from endpoint for stopId='%s'\n", stopId);
 
     if (!http.begin(url))
     {
@@ -139,6 +188,127 @@ bool BkkDeparturesProvider::fetchDepartures(
     Serial.printf("[BKK] Response (%d bytes): %.100s...\n", payload.length(), payload.c_str());
 
     return parseBkkResponse(payload, outBuses, outBusCount, outTrains, outTrainCount);
+}
+
+bool BkkDeparturesProvider::fetchDepartures(
+    Departure* outBuses, int& outBusCount,
+    Departure* outTrains, int& outTrainCount)
+{
+    outBusCount = 0;
+    outTrainCount = 0;
+
+    for (int i = 0; i < MAX_DEPARTURES; ++i)
+    {
+        s_busStopBuses[i] = {};
+        s_busStopTrains[i] = {};
+        s_trainStopBuses[i] = {};
+        s_trainStopTrains[i] = {};
+    }
+    int busStopBusCount = 0;
+    int busStopTrainCount = 0;
+    int trainStopBusCount = 0;
+    int trainStopTrainCount = 0;
+
+    const bool hasBusStop = m_busStopId[0] != '\0';
+    const bool hasTrainStop = m_trainStopId[0] != '\0';
+
+    if (!hasBusStop && !hasTrainStop)
+    {
+        Serial.println("[BKK] Neither bus nor train stop configured");
+        return false;
+    }
+
+    bool anySuccess = false;
+
+    if (hasBusStop)
+    {
+        Serial.printf("[BKK] Fetching bus-stop data from '%s'\n", m_busStopId);
+        anySuccess = fetchForStop(m_busStopId,
+                                  s_busStopBuses,
+                                  busStopBusCount,
+                                  s_busStopTrains,
+                                  busStopTrainCount) || anySuccess;
+    }
+
+    if (hasTrainStop)
+    {
+        const bool sameStop = hasBusStop && strncmp(m_busStopId, m_trainStopId, sizeof(m_busStopId)) == 0;
+        if (!sameStop)
+        {
+            Serial.printf("[BKK] Fetching train-stop data from '%s'\n", m_trainStopId);
+            anySuccess = fetchForStop(m_trainStopId,
+                                      s_trainStopBuses,
+                                      trainStopBusCount,
+                                      s_trainStopTrains,
+                                      trainStopTrainCount) || anySuccess;
+        }
+        else
+        {
+            // Reuse bus-stop response if both stops are identical.
+            trainStopTrainCount = busStopTrainCount;
+            for (int i = 0; i < trainStopTrainCount && i < MAX_DEPARTURES; ++i)
+            {
+                s_trainStopTrains[i] = s_busStopTrains[i];
+            }
+        }
+    }
+
+    // Buses come from bus stop first; fallback to train stop if bus stop is empty or unavailable.
+    const Departure* selectedBuses = nullptr;
+    int selectedBusCount = 0;
+    if (busStopBusCount > 0)
+    {
+        selectedBuses = s_busStopBuses;
+        selectedBusCount = busStopBusCount;
+    }
+    else if (trainStopBusCount > 0)
+    {
+        selectedBuses = s_trainStopBuses;
+        selectedBusCount = trainStopBusCount;
+    }
+
+    // Trains come from train stop first; fallback to bus stop if train stop is empty or unavailable.
+    const Departure* selectedTrains = nullptr;
+    int selectedTrainCount = 0;
+    if (trainStopTrainCount > 0)
+    {
+        selectedTrains = s_trainStopTrains;
+        selectedTrainCount = trainStopTrainCount;
+    }
+    else if (busStopTrainCount > 0)
+    {
+        selectedTrains = s_busStopTrains;
+        selectedTrainCount = busStopTrainCount;
+    }
+
+    outBusCount = selectedBusCount;
+    outTrainCount = selectedTrainCount;
+
+    for (int i = 0; i < outBusCount && i < MAX_DEPARTURES; ++i)
+    {
+        outBuses[i] = selectedBuses[i];
+    }
+    for (int i = outBusCount; i < MAX_DEPARTURES; ++i)
+    {
+        outBuses[i] = {};
+    }
+
+    for (int i = 0; i < outTrainCount && i < MAX_DEPARTURES; ++i)
+    {
+        outTrains[i] = selectedTrains[i];
+    }
+    for (int i = outTrainCount; i < MAX_DEPARTURES; ++i)
+    {
+        outTrains[i] = {};
+    }
+
+    Serial.printf("[BKK] Combined result: buses=%d trains=%d (busStop='%s' trainStop='%s')\n",
+                  outBusCount,
+                  outTrainCount,
+                  m_busStopId,
+                  m_trainStopId);
+
+    return anySuccess;
 }
 
 bool BkkDeparturesProvider::isTrainRoute(const char* shortName, const char* description)
