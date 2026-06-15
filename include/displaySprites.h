@@ -18,40 +18,9 @@
 #include "Thunderstorm_64x48.h"
 #include "Thunderstorm_Slight_Heavy_Hail_64x48.h"
 #include "Bus_128x128.h"
-
-// 16x12 monochrome sprites, one uint16_t per row (MSB is leftmost pixel)
-constexpr int SPRITE_ICON_WIDTH  = 16;
-constexpr int SPRITE_ICON_HEIGHT = 12;
-
-constexpr uint16_t SPRITE_BUS_16X12[SPRITE_ICON_HEIGHT] = {
-    0b0000000000000000,
-    0b0000001111110000,
-    0b0000111111111100,
-    0b0001111111111110,
-    0b0011111111111111,
-    0b0011111111111111,
-    0b0011110000111111,
-    0b0011111111111111,
-    0b0011000000000011,
-    0b0011111111111111,
-    0b0000110000110000,
-    0b0001100000011000,
-};
-
-constexpr uint16_t SPRITE_TRAIN_16X12[SPRITE_ICON_HEIGHT] = {
-    0b0000000000000000,
-    0b0000011111110000,
-    0b0001111111111100,
-    0b0011111111111110,
-    0b0011111111111111,
-    0b0011111111111111,
-    0b0011110001111111,
-    0b0011111111111111,
-    0b0011111111111111,
-    0b0011111111111110,
-    0b0000110000110000,
-    0b0001100000011000,
-};
+#include "Bus_32x32.h"
+#include "Train_128x128.h"
+#include "Train_32x32.h"
 
 // 9x12 monochrome metric sprites (one uint16_t per row, left-aligned to width 9)
 constexpr int SPRITE_WEATHER_ICON_WIDTH  = 9;

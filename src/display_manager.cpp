@@ -20,11 +20,11 @@ constexpr uint32_t DISPLAY_NOTIFY_DATA   = (1UL << 0);
 constexpr uint32_t DISPLAY_NOTIFY_STATUS = (1UL << 1);
 constexpr uint32_t DISPLAY_DATA_REFRESH_INTERVAL_MS = 10UL * 60UL * 1000UL;
 
-static void drawSleepingIcon(int centerX, int centerY, const uint16_t *spriteRows, uint16_t spriteColor)
+static void drawSleepingIcon(int centerX, int centerY, int width, int height,const uint16_t *spriteRows, uint16_t spriteColor)
 {
-    constexpr int iconScale = 2;
-    const int iconW = SPRITE_ICON_WIDTH * iconScale;
-    const int iconH = SPRITE_ICON_HEIGHT * iconScale;
+    constexpr int iconScale = 1;
+    const int iconW = width * iconScale;
+    const int iconH = height * iconScale;
     const int iconX = centerX - (iconW / 2);
     const int iconY = centerY - (iconH / 2) + 8;
 
@@ -234,7 +234,6 @@ static void drawClockIcon(int centerX, int centerY, uint16_t color)
     // Hour hand to ~4 o'clock
     g_epaper.drawLine(centerX, centerY, centerX + 3, centerY + 2, color);
 }
-
 
 static void drawWeatherMetricsRow(int cardX,
                                   int cardW,
@@ -1121,11 +1120,11 @@ void displayLineData(const Departure* departures, int count, int x, int y, uint1
 
         if (color == EINK_YELLOW)
         {
-            drawSleepingIcon(centerX, centerY, (uint16_t *)Bus_WhiteBG_128x128, EINK_BLACK);
+            drawSleepingIcon(centerX, centerY, 128, 128, (uint16_t *)Bus_WhiteBG_128x128, EINK_BLACK);
         }
         else
         {
-            drawSleepingIcon(centerX, centerY, SPRITE_TRAIN_16X12, EINK_BLACK);
+            drawSleepingIcon(centerX, centerY, 128, 128, (uint16_t *)Train_WhiteBG_128x128, EINK_BLACK);
         }
 
         return;
@@ -1310,26 +1309,32 @@ void displayEmptyBackground()
 
     g_epaper.setRotation(3);
     g_epaper.setTextColor(EINK_BLACK, EINK_YELLOW, true);
-    displayutil::drawMonochromeSprite(g_epaper,
+    /*displayutil::drawMonochromeSprite(g_epaper,
                                       BUS_SECTION_X + 14,
                                       BUS_SECTION_Y + 8,
                                       SPRITE_BUS_16X12,
                                       SPRITE_ICON_WIDTH,
                                       SPRITE_ICON_HEIGHT,
                                       2,
-                                      EINK_BLACK);
-    drawStringUtf8("BUSZ INDULÁSOK", BUS_SECTION_X + 36, BUS_SECTION_Y + 8, 32);
+                                      EINK_BLACK);*/
+
+    uint16_t * busIconSpriteData = (uint16_t *)Bus_YellowBG_32x32;
+    if (busIconSpriteData != nullptr)
+    {
+        g_epaper.pushImage(BUS_SECTION_X + 5, BUS_SECTION_Y + 6, 32, 32, (uint16_t *)busIconSpriteData);
+    }
+
+    drawStringUtf8("BUSZ INDULÁSOK", BUS_SECTION_X + 36, BUS_SECTION_Y + 7, 32);
 
     g_epaper.setRotation(3);
     g_epaper.setTextColor(EINK_WHITE, EINK_BLUE, true);
-    displayutil::drawMonochromeSprite(g_epaper,
-                                      TRAIN_SECTION_X + 14,
-                                      TRAIN_SECTION_Y + 8,
-                                      SPRITE_TRAIN_16X12,
-                                      SPRITE_ICON_WIDTH,
-                                      SPRITE_ICON_HEIGHT,
-                                      2,
-                                      EINK_BLACK);
+
+    uint16_t * trainIconSpriteData = (uint16_t *)Train_BlueBG_Inverted_32x32;
+    if (trainIconSpriteData != nullptr)
+    {
+        g_epaper.pushImage(TRAIN_SECTION_X + 5, TRAIN_SECTION_Y + 6, 32, 32, (uint16_t *)trainIconSpriteData);
+    }
+
     drawStringUtf8("VONAT INDULÁSOK", TRAIN_SECTION_X + 36, TRAIN_SECTION_Y + 8, 32);
 
     g_epaper.setRotation(3);
