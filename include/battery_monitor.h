@@ -4,7 +4,8 @@
 
 enum class BatteryBand : uint8_t
 {
-    Charging = 0,
+    NoBattery = 0,
+    Charging,
     Percent100To80,
     Percent79To60,
     Percent59To40,

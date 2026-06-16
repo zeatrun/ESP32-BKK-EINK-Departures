@@ -1482,6 +1482,7 @@ void displayNotifyBatteryBandChanged(BatteryBand band, float voltage, int percen
     const char* bandLabel = "unknown";
     switch (band)
     {
+        case BatteryBand::NoBattery:     bandLabel = "NO BATTERY"; break;
         case BatteryBand::Charging:      bandLabel = "charging"; break;
         case BatteryBand::Percent100To80: bandLabel = "100-80%"; break;
         case BatteryBand::Percent79To60:  bandLabel = "79-60%"; break;
