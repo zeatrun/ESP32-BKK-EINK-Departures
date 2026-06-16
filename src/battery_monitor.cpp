@@ -14,11 +14,7 @@ constexpr uint8_t BATTERY_VOLTAGE_PIN = 1; // GPIO1_D0
 constexpr uint8_t BATTERY_VOLTAGE_PIN = A0;
 #endif
 
-#ifndef A5
 constexpr int8_t BATTERY_ADC_ENABLE_PIN = 5; // GPIO5, TPS22916 ON/OFF control
-#else
-constexpr int8_t BATTERY_ADC_ENABLE_PIN = A5;
-#endif
 
 constexpr uint32_t BATTERY_SAMPLE_INTERVAL_MS = 15000;
 constexpr uint8_t BATTERY_SAMPLE_COUNT = 8;
@@ -52,6 +48,26 @@ struct BatteryReading
     float voltage;    ///< Voltage converted from the ADC reading (V).
     uint16_t rawAdc;  ///< Average of BATTERY_SAMPLE_COUNT raw 12-bit ADC values.
 };
+
+/**
+ * @brief Print a one-line battery status line to Serial.
+ *
+ * Format: [BATTERY] <context>: <band>, <voltage> V, <percent>%
+ * Example: [BATTERY] Periodic: 100-80%, 4.05 V, 87%
+ *
+ * @param context  Short label identifying the call site (e.g. "Init", "Periodic").
+ * @param band     Current battery band.
+ * @param voltage  Filtered voltage in volts.
+ * @param percent  Estimated charge percentage.
+ */
+void logBatteryStatus(const char* context, BatteryBand band, float voltage, int percent)
+{
+    Serial.printf("[BATTERY] %s: %s, %.2f V, %d%%\n",
+                  context,
+                  batteryBandToString(band),
+                  static_cast<double>(voltage),
+                  percent);
+}
 
 inline void setBatteryAdcPathEnabled(bool enabled)
 {
@@ -254,26 +270,6 @@ void batteryTask(void* /*pvParameters*/)
         lastVoltage = measuredVoltage;
         vTaskDelay(pdMS_TO_TICKS(BATTERY_SAMPLE_INTERVAL_MS));
     }
-}
-
-/**
- * @brief Print a one-line battery status line to Serial.
- *
- * Format: [BATTERY] <context>: <band>, <voltage> V, <percent>%
- * Example: [BATTERY] Periodic: 100-80%, 4.05 V, 87%
- *
- * @param context  Short label identifying the call site (e.g. "Init", "Periodic").
- * @param band     Current battery band.
- * @param voltage  Filtered voltage in volts.
- * @param percent  Estimated charge percentage.
- */
-void logBatteryStatus(const char* context, BatteryBand band, float voltage, int percent)
-{
-    Serial.printf("[BATTERY] %s: %s, %.2f V, %d%%\n",
-                  context,
-                  batteryBandToString(band),
-                  static_cast<double>(voltage),
-                  percent);
 }
 
 } // namespace
