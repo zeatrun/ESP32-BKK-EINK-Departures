@@ -21,6 +21,7 @@
 #include "Bus_32x32.h"
 #include "Train_128x128.h"
 #include "Train_32x32.h"
+#include "battery_32x64.h"
 
 // 9x12 monochrome metric sprites (one uint16_t per row, left-aligned to width 9)
 constexpr int SPRITE_WEATHER_ICON_WIDTH  = 9;

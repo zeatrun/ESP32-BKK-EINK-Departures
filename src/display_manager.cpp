@@ -136,6 +136,22 @@ static const char* resolveNotoFontName(int requestedPt)
     return nullptr;
 }
 
+static const unsigned char* getBatterySpriteData(BatteryBand band)
+{
+    switch (band)
+    {
+        case BatteryBand::NoBattery:       return Battery_NoBattery_WhiteBG_32x64;
+        case BatteryBand::Charging:        return Battery_Chargeing_WhiteBG_32x64;
+        case BatteryBand::Percent100To80:  return Battery_Band6_WhiteBG_32x64;
+        case BatteryBand::Percent79To60:   return Battery_Band5_WhiteBG_32x64;
+        case BatteryBand::Percent59To40:   return Battery_Band4_WhiteBG_32x64;
+        case BatteryBand::Percent39To20:   return Battery_Band3_WhiteBG_32x64;
+        case BatteryBand::Percent19To10:   return Battery_Band2_WhiteBG_32x64;
+        case BatteryBand::Percent10OrLess: return Battery_Band1_WhiteBG_32x64;
+        default:                           return Battery_NoBattery_WhiteBG_32x64;
+    }
+}
+
 static void drawStringUtf8(const char* text, int x, int y, int requestedPt = 16)
 {
     if (text == nullptr)
@@ -162,11 +178,6 @@ static void drawStringUtf8(const char* text, int x, int y, int requestedPt = 16)
 
 static void drawTopRightStatus()
 {
-    constexpr int topX = STATUS_SECTION_X + 355;
-    constexpr int topY = STATUS_SECTION_Y + 2;
-    constexpr int topClearWidth = 120;
-    constexpr int topClearHeight = 16;
-
     constexpr int mqttTimeX = STATUS_SECTION_X + 75;
     constexpr int mqttTimeY = STATUS_SECTION_Y + 34;
     constexpr int mqttClearWidth = 80;
@@ -175,6 +186,11 @@ static void drawTopRightStatus()
     constexpr int dotRadius = 5;
     constexpr int dotX = STATUS_SECTION_X + 123;
     constexpr int dotY = STATUS_SECTION_Y + 42;
+
+    constexpr int batteryX = STATUS_SECTION_X + 420;
+    constexpr int batteryY = STATUS_SECTION_Y + 2;
+    constexpr int batteryW = 64;
+    constexpr int batteryH = 32;
 
     g_epaper.fillRect(mqttTimeX, mqttTimeY, mqttClearWidth, mqttClearHeight, EINK_WHITE);
 
@@ -194,6 +210,10 @@ static void drawTopRightStatus()
     const uint16_t dotColor = dataSourceManagerIsConnected() ? EINK_GREEN : EINK_RED;
     g_epaper.fillCircle(dotX, dotY, dotRadius, dotColor);
     g_epaper.drawCircle(dotX, dotY, dotRadius, EINK_BLACK);
+
+    g_epaper.fillRect(batteryX, batteryY, batteryW, batteryH, EINK_WHITE);
+    const unsigned char* batterySprite = getBatterySpriteData(batteryMonitorGetCurrentBand());
+    g_epaper.pushImage(batteryX, batteryY, batteryW, batteryH, (uint16_t*)batterySprite);
 }
 
 static void drawBoldText(const char* text, int x, int y)
@@ -1379,6 +1399,7 @@ void displayTask(void* /*pvParameters*/)
         xTaskNotifyWait(0, UINT32_MAX, &notifyValue, portMAX_DELAY);
 
         const bool refreshData = (notifyValue & DISPLAY_NOTIFY_DATA) != 0;
+        const bool refreshStatus = (notifyValue & DISPLAY_NOTIFY_STATUS) != 0;
         bool shouldRenderData = false;
         bool currentDepartureReady = false;
         bool currentWeatherReady = false;
@@ -1450,7 +1471,7 @@ void displayTask(void* /*pvParameters*/)
             }
         }
 
-        const bool shouldUpdate = shouldRenderData;
+        const bool shouldUpdate = shouldRenderData || refreshStatus;
 
         if (shouldUpdate && takeDisplayMutex(pdMS_TO_TICKS(500)))
         {
@@ -1459,6 +1480,10 @@ void displayTask(void* /*pvParameters*/)
                 drawWeatherCards(&s_weatherCopy, s_weatherValidCopy);
                 displayLineData(s_busCopy, busCount, BUS_SECTION_X, BUS_SECTION_Y + 43, EINK_YELLOW);
                 displayLineData(s_trainCopy, trainCount, TRAIN_SECTION_X, TRAIN_SECTION_Y + 43, EINK_BLUE);
+                drawTopRightStatus();
+            }
+            else if (refreshStatus)
+            {
                 drawTopRightStatus();
             }
 
@@ -1483,6 +1508,11 @@ void displayNotifyBatteryBandChanged(BatteryBand band, float voltage, int percen
                   batteryBandToString(band),
                   static_cast<double>(voltage),
                   percent);
+
+    if (g_displayTaskHandle != nullptr)
+    {
+        xTaskNotify(g_displayTaskHandle, DISPLAY_NOTIFY_STATUS, eSetBits);
+    }
 }
 
 void displayTaskStart()
