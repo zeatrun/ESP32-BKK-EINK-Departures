@@ -2,6 +2,7 @@
 
 #include <Arduino.h>
 #include "departures.h"
+#include "battery_monitor.h"
 
 #define EINK_BLACK 0XF
 #define EINK_WHITE 0X0
@@ -49,3 +50,6 @@ void displayRenderDepartures(const Departure* trains,
                              int              busCount);
 void displayRenderFromGlobals();
 void displayEmptyBackground();
+
+// Placeholder callback for battery-band transitions.
+void displayNotifyBatteryBandChanged(BatteryBand band, float voltage, int percent);

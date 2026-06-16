@@ -8,6 +8,7 @@
 #include "weather.h"
 #include "display_manager.h"
 #include "time_manager.h"
+#include "battery_monitor.h"
 
 // ── Shared networking resources ──────────────────────────────────────────────
 // espClient is shared between the WiFi and MQTT subsystems.
@@ -61,6 +62,9 @@ void setup()
     // ── Time manager ──────────────────────────────────────────────────────────
     timeManagerInit(s_wifiEventGroup);
     timeManagerStart();
+
+    // ── Battery monitor (starts monitoring after init) ───────────────────────
+    batteryMonitorInit();
 }
 
 // ── loop ─────────────────────────────────────────────────────────────────────
