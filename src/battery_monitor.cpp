@@ -14,6 +14,12 @@ constexpr uint8_t BATTERY_VOLTAGE_PIN = 1; // GPIO1_D0
 constexpr uint8_t BATTERY_VOLTAGE_PIN = A0;
 #endif
 
+#ifndef A5
+constexpr int8_t BATTERY_ADC_ENABLE_PIN = 5; // GPIO5, TPS22916 ON/OFF control
+#else
+constexpr int8_t BATTERY_ADC_ENABLE_PIN = A5;
+#endif
+
 constexpr uint32_t BATTERY_SAMPLE_INTERVAL_MS = 15000;
 constexpr uint8_t BATTERY_SAMPLE_COUNT = 8;
 constexpr float BATTERY_ADC_SCALE = 7.16F;
@@ -47,6 +53,11 @@ struct BatteryReading
     uint16_t rawAdc;  ///< Average of BATTERY_SAMPLE_COUNT raw 12-bit ADC values.
 };
 
+inline void setBatteryAdcPathEnabled(bool enabled)
+{
+    digitalWrite(BATTERY_ADC_ENABLE_PIN, enabled ? HIGH : LOW);
+}
+
 /**
  * @brief Sample the battery voltage pin and return the averaged result.
  *
@@ -58,6 +69,10 @@ struct BatteryReading
  */
 BatteryReading readBatteryVoltageOnce()
 {
+    // TPS22916: connect battery divider path to ADC only during measurement.
+    setBatteryAdcPathEnabled(true);
+    delay(2);
+
     analogReadResolution(12);
 
     uint32_t sum = 0;
@@ -70,6 +85,9 @@ BatteryReading readBatteryVoltageOnce()
 
     const uint16_t avgAdc = static_cast<uint16_t>(sum / BATTERY_SAMPLE_COUNT);
     const float voltage = (static_cast<float>(avgAdc) / 4096.0F) * BATTERY_ADC_SCALE;
+
+    setBatteryAdcPathEnabled(false);
+
     return {voltage, avgAdc};
 }
 
@@ -263,6 +281,8 @@ void logBatteryStatus(const char* context, BatteryBand band, float voltage, int 
 void batteryMonitorInit()
 {
     pinMode(BATTERY_VOLTAGE_PIN, INPUT);
+    pinMode(BATTERY_ADC_ENABLE_PIN, OUTPUT);
+    setBatteryAdcPathEnabled(false);
 
     // Perform quick initial readings to warm up the filter before task starts.
     // This ensures we have a good voltage value from startup (6 measurements, 100ms apart).
