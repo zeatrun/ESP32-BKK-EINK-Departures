@@ -14,12 +14,6 @@ constexpr uint8_t BATTERY_VOLTAGE_PIN = 1; // GPIO1_D0
 constexpr uint8_t BATTERY_VOLTAGE_PIN = A0;
 #endif
 
-#ifndef A5
-constexpr int8_t BATTERY_ADC_ENABLE_PIN = -1;
-#else
-constexpr int8_t BATTERY_ADC_ENABLE_PIN = A5; // GPIO6
-#endif
-
 constexpr uint32_t BATTERY_SAMPLE_INTERVAL_MS = 15000;
 constexpr uint8_t BATTERY_SAMPLE_COUNT = 8;
 constexpr float BATTERY_ADC_SCALE = 7.16F;
@@ -190,21 +184,27 @@ void batteryTask(void* /*pvParameters*/)
             s_hasInitialBand = true;
         }
 
+        logBatteryStatus("Periodic", s_currentBand, measuredVoltage, measuredPercent);
+
         lastVoltage = measuredVoltage;
         vTaskDelay(pdMS_TO_TICKS(BATTERY_SAMPLE_INTERVAL_MS));
     }
 }
+
+void logBatteryStatus(const char* context, BatteryBand band, float voltage, int percent)
+{
+    Serial.printf("[BATTERY] %s: %s, %.2f V, %d%%\n",
+                  context,
+                  batteryBandToString(band),
+                  static_cast<double>(voltage),
+                  percent);
+}
+
 } // namespace
 
 void batteryMonitorInit()
 {
     pinMode(BATTERY_VOLTAGE_PIN, INPUT);
-
-    if (BATTERY_ADC_ENABLE_PIN >= 0)
-    {
-        pinMode(BATTERY_ADC_ENABLE_PIN, OUTPUT);
-        digitalWrite(BATTERY_ADC_ENABLE_PIN, HIGH);
-    }
 
     // Perform quick initial readings to warm up the filter before task starts.
     // This ensures we have a good voltage value from startup (6 measurements, 100ms apart).
@@ -225,10 +225,7 @@ void batteryMonitorInit()
     s_currentBand = percentToBand(s_percent, false, s_voltage, false);
     s_hasInitialBand = true;
 
-    Serial.printf("[BATTERY] Init complete. Starting at: %.2f V, %d%%, Band: %u\n",
-                  static_cast<double>(s_voltage),
-                  s_percent,
-                  static_cast<unsigned int>(s_currentBand));
+    logBatteryStatus("Init", s_currentBand, s_voltage, s_percent);
 
     if (s_batteryTaskHandle == nullptr)
     {
@@ -261,4 +258,20 @@ int batteryMonitorGetPercent()
 bool batteryMonitorIsCharging()
 {
     return s_isCharging;
+}
+
+const char* batteryBandToString(BatteryBand band)
+{
+    switch (band)
+    {
+        case BatteryBand::NoBattery:       return "No battery";
+        case BatteryBand::Charging:        return "Charging";
+        case BatteryBand::Percent100To80:  return "100-80%";
+        case BatteryBand::Percent79To60:   return "79-60%";
+        case BatteryBand::Percent59To40:   return "59-40%";
+        case BatteryBand::Percent39To20:   return "39-20%";
+        case BatteryBand::Percent19To10:   return "19-10%";
+        case BatteryBand::Percent10OrLess: return "<=10%";
+        default:                           return "Unknown";
+    }
 }

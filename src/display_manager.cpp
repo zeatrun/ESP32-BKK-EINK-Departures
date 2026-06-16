@@ -1479,22 +1479,8 @@ void displayNotifyDataChanged()
 void displayNotifyBatteryBandChanged(BatteryBand band, float voltage, int percent)
 {
     // Placeholder: actual icon/text rendering will be implemented later.
-    const char* bandLabel = "unknown";
-    switch (band)
-    {
-        case BatteryBand::NoBattery:     bandLabel = "NO BATTERY"; break;
-        case BatteryBand::Charging:      bandLabel = "charging"; break;
-        case BatteryBand::Percent100To80: bandLabel = "100-80%"; break;
-        case BatteryBand::Percent79To60:  bandLabel = "79-60%"; break;
-        case BatteryBand::Percent59To40:  bandLabel = "59-40%"; break;
-        case BatteryBand::Percent39To20:  bandLabel = "39-20%"; break;
-        case BatteryBand::Percent19To10:  bandLabel = "19-10%"; break;
-        case BatteryBand::Percent10OrLess: bandLabel = "10%-"; break;
-        default: break;
-    }
-
     Serial.printf("[DISPLAY] Battery band changed: %s, %.3f V, %d%%\n",
-                  bandLabel,
+                  batteryBandToString(band),
                   static_cast<double>(voltage),
                   percent);
 }

@@ -19,3 +19,6 @@ BatteryBand batteryMonitorGetCurrentBand();
 float batteryMonitorGetVoltage();
 int batteryMonitorGetPercent();
 bool batteryMonitorIsCharging();
+
+/** Returns a short human-readable label for the given band (e.g. "100-80%", "Charging"). */
+const char* batteryBandToString(BatteryBand band);
