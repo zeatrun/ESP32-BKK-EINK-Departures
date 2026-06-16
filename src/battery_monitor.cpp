@@ -40,12 +40,22 @@ volatile bool s_noBatteryConfirmed = false;  // Hysteresis: debounce battery dis
 // alpha=0.15: good balance between response speed and stability (~3-5 sample average).
 static LowPassFilter s_voltageFilter(2.0F, 0.15F);
 
+/** Raw ADC measurement result. */
 struct BatteryReading
 {
-    float voltage;
-    uint16_t rawAdc;
+    float voltage;    ///< Voltage converted from the ADC reading (V).
+    uint16_t rawAdc;  ///< Average of BATTERY_SAMPLE_COUNT raw 12-bit ADC values.
 };
 
+/**
+ * @brief Sample the battery voltage pin and return the averaged result.
+ *
+ * Takes BATTERY_SAMPLE_COUNT readings with a 10 ms settle delay each,
+ * averages them, and converts to volts using the board's resistor-divider
+ * scale factor (BATTERY_ADC_SCALE = 7.16).
+ *
+ * @return BatteryReading with the converted voltage and the average raw ADC value.
+ */
 BatteryReading readBatteryVoltageOnce()
 {
     analogReadResolution(12);
@@ -63,6 +73,15 @@ BatteryReading readBatteryVoltageOnce()
     return {voltage, avgAdc};
 }
 
+/**
+ * @brief Convert a filtered battery voltage to a charge percentage.
+ *
+ * Uses a linear mapping between BATTERY_EMPTY_V (3.10 V = 0 %) and
+ * BATTERY_FULL_V (4.20 V = 100 %). Values outside this range are clamped.
+ *
+ * @param voltage  Filtered battery voltage in volts.
+ * @return         Charge percentage in the range [0, 100].
+ */
 int voltageToPercent(float voltage)
 {
     const float clamped = (voltage < BATTERY_EMPTY_V)
@@ -77,6 +96,23 @@ int voltageToPercent(float voltage)
     return percent;
 }
 
+/**
+ * @brief Map a voltage/percent/charging state to a BatteryBand.
+ *
+ * Applies two-threshold hysteresis for the NoBattery state to prevent
+ * chatter when the voltage is near the disconnection boundary:
+ *   - Enter NoBattery when voltage < BATTERY_DISCONNECT_THRESHOLD_V (1.80 V)
+ *   - Leave NoBattery only when voltage >= BATTERY_RECOVERY_THRESHOLD_V (2.50 V)
+ *
+ * The noBatteryConfirmed flag is maintained externally with a debounce streak
+ * (NO_BATTERY_CONFIRM_STREAK consecutive low readings required).
+ *
+ * @param percent             Estimated charge percentage.
+ * @param isCharging          True when a rising voltage streak has been detected.
+ * @param voltage             Current filtered voltage (used for disconnect detection).
+ * @param noBatteryConfirmed  True when the NoBattery state has been debounce-confirmed.
+ * @return                    The corresponding BatteryBand.
+ */
 BatteryBand percentToBand(int percent, bool isCharging, float voltage, bool noBatteryConfirmed)
 {
     // Hysteresis: battery disconnection detection with debounce.
@@ -115,6 +151,17 @@ BatteryBand percentToBand(int percent, bool isCharging, float voltage, bool noBa
     return BatteryBand::Percent10OrLess;
 }
 
+/**
+ * @brief FreeRTOS task: periodically reads, filters, and evaluates battery state.
+ *
+ * Runs every BATTERY_SAMPLE_INTERVAL_MS (15 s) on Core 1.
+ * On each tick:
+ *   1. Reads raw voltage and passes it through the low-pass filter.
+ *   2. Updates the NoBattery debounce streak.
+ *   3. Tracks a rising-voltage streak to infer charging.
+ *   4. Recomputes the BatteryBand; notifies display_manager on band changes.
+ *   5. Writes the current state to the serial log.
+ */
 void batteryTask(void* /*pvParameters*/)
 {
     float lastVoltage = 0.0F;
@@ -191,6 +238,17 @@ void batteryTask(void* /*pvParameters*/)
     }
 }
 
+/**
+ * @brief Print a one-line battery status line to Serial.
+ *
+ * Format: [BATTERY] <context>: <band>, <voltage> V, <percent>%
+ * Example: [BATTERY] Periodic: 100-80%, 4.05 V, 87%
+ *
+ * @param context  Short label identifying the call site (e.g. "Init", "Periodic").
+ * @param band     Current battery band.
+ * @param voltage  Filtered voltage in volts.
+ * @param percent  Estimated charge percentage.
+ */
 void logBatteryStatus(const char* context, BatteryBand band, float voltage, int percent)
 {
     Serial.printf("[BATTERY] %s: %s, %.2f V, %d%%\n",
