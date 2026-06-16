@@ -31,6 +31,63 @@ It is designed for low-noise updates on e-paper and for robust operation with re
 - QR generator: QRCode
 - Graphics driver: Seeed_GFX (local library in lib/Seeed_GFX-master)
 
+## Battery Monitoring
+
+The firmware includes a dedicated battery monitor module for a 3.7V Li-Ion cell.
+
+### Hardware path
+
+- Voltage sense input: GPIO1_D0 / A0
+- ADC path enable: GPIO5
+- The EE04 board uses a TPS22916 load switch to connect battery sense to ADC.
+- During measurement, GPIO5 is set HIGH (path ON), then set LOW again (path OFF).
+
+This keeps the ADC sense path active only when needed.
+
+### Module location and integration
+
+- Monitor API: [include/battery_monitor.h](include/battery_monitor.h)
+- Monitor implementation: [src/battery_monitor.cpp](src/battery_monitor.cpp)
+- Low-pass filter helper: [include/low_pass_filter.h](include/low_pass_filter.h)
+- Display integration: [src/display_manager.cpp](src/display_manager.cpp)
+
+Startup sequence in [src/main.cpp](src/main.cpp):
+- `batteryMonitorInit()` is called during setup.
+- The monitor performs fast startup sampling, then runs periodic sampling every 15 seconds.
+
+### Sampling and filtering behavior
+
+- Per measurement cycle:
+	- ADC path ON (GPIO5 HIGH)
+	- short settle delay
+	- multiple ADC reads on A0 (12-bit), averaged
+	- ADC path OFF (GPIO5 LOW)
+- Voltage conversion uses the board divider scale factor: 7.16
+- Exponential low-pass filter smooths values to reduce noise and flicker in band transitions.
+
+### Battery bands and state model
+
+The monitor maps filtered voltage to 7 display bands plus charging/no-battery state:
+
+- NoBattery
+- Charging
+- 100-80%
+- 79-60%
+- 59-40%
+- 39-20%
+- 19-10%
+- <=10%
+
+Notes:
+- Percentage mapping is linear between 3.10 V (0%) and 4.20 V (100%).
+- No-battery detection uses hysteresis and debounce to avoid chatter:
+	- enter below 1.80 V
+	- recover only above 2.50 V
+
+### Display indicator
+
+On battery-band change, display manager receives a notification and refreshes the status area so the icon updates immediately.
+
 ## Project Structure
 
 - [src/main.cpp](src/main.cpp): startup, task initialization order
