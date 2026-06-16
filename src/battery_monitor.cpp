@@ -314,26 +314,67 @@ void batteryMonitorInit()
     }
 }
 
+/**
+ * @brief Return the latest computed battery band.
+ *
+ * This value is updated by the battery monitoring task and can be queried
+ * by UI or telemetry code to display coarse battery state.
+ *
+ * @return Current BatteryBand snapshot.
+ */
 BatteryBand batteryMonitorGetCurrentBand()
 {
     return s_currentBand;
 }
 
+/**
+ * @brief Return the latest filtered battery voltage.
+ *
+ * Voltage is low-pass filtered before storage to reduce ADC noise and avoid
+ * spurious state changes.
+ *
+ * @return Battery voltage in volts.
+ */
 float batteryMonitorGetVoltage()
 {
     return s_voltage;
 }
 
+/**
+ * @brief Return the latest estimated battery percentage.
+ *
+ * Percent is derived from a linear mapping between BATTERY_EMPTY_V and
+ * BATTERY_FULL_V after voltage filtering.
+ *
+ * @return Estimated battery level in range [0, 100].
+ */
 int batteryMonitorGetPercent()
 {
     return s_percent;
 }
 
+/**
+ * @brief Return whether charging is currently inferred.
+ *
+ * Charging is inferred from a sustained positive voltage trend across multiple
+ * periodic samples.
+ *
+ * @return true if charging is inferred, otherwise false.
+ */
 bool batteryMonitorIsCharging()
 {
     return s_isCharging;
 }
 
+/**
+ * @brief Convert a BatteryBand enum value to a short text label.
+ *
+ * The returned pointer refers to a string literal with static storage
+ * duration and must not be modified or freed.
+ *
+ * @param band Battery band enum value.
+ * @return Human-readable label for logging and UI placeholders.
+ */
 const char* batteryBandToString(BatteryBand band)
 {
     switch (band)
