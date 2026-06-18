@@ -136,8 +136,24 @@ static const char* resolveNotoFontName(int requestedPt)
     return nullptr;
 }
 
-static const unsigned char* getBatterySpriteData(BatteryBand band)
+static const unsigned char* getBatterySpriteData(BatteryBand band, bool isSmall)
 {
+    if (isSmall)
+    {
+        switch (band)
+        {
+            case BatteryBand::NoBattery:       return Battery_NoBattery_WhiteBG_18x16;
+            case BatteryBand::Charging:        return Battery_Chargeing_WhiteBG_18x16;
+            case BatteryBand::Percent100To80:  return Battery_Band6_WhiteBG_18x16;
+            case BatteryBand::Percent79To60:   return Battery_Band5_WhiteBG_18x16;
+            case BatteryBand::Percent59To40:   return Battery_Band4_WhiteBG_18x16;
+            case BatteryBand::Percent39To20:   return Battery_Band3_WhiteBG_18x16;
+            case BatteryBand::Percent19To10:   return Battery_Band2_WhiteBG_18x16;
+            case BatteryBand::Percent10OrLess: return Battery_Band1_WhiteBG_18x16;
+            default:                           return Battery_NoBattery_WhiteBG_18x16;
+        }
+    }
+
     switch (band)
     {
         case BatteryBand::NoBattery:       return Battery_NoBattery_WhiteBG_32x64;
@@ -187,10 +203,10 @@ static void drawTopRightStatus()
     constexpr int dotX = STATUS_SECTION_X + 123;
     constexpr int dotY = STATUS_SECTION_Y + 42;
 
-    constexpr int batteryX = STATUS_SECTION_X + 420;
-    constexpr int batteryY = STATUS_SECTION_Y + 2;
-    constexpr int batteryW = 64;
-    constexpr int batteryH = 32;
+    constexpr int batteryX = STATUS_SECTION_X + 135;
+    constexpr int batteryY = STATUS_SECTION_Y + 35;
+    constexpr int batteryW = 18;
+    constexpr int batteryH = 16;
 
     g_epaper.fillRect(mqttTimeX, mqttTimeY, mqttClearWidth, mqttClearHeight, EINK_WHITE);
 
@@ -212,7 +228,7 @@ static void drawTopRightStatus()
     g_epaper.drawCircle(dotX, dotY, dotRadius, EINK_BLACK);
 
     g_epaper.fillRect(batteryX, batteryY, batteryW, batteryH, EINK_WHITE);
-    const unsigned char* batterySprite = getBatterySpriteData(batteryMonitorGetCurrentBand());
+    const unsigned char* batterySprite = getBatterySpriteData(batteryMonitorGetCurrentBand(), true);
     g_epaper.pushImage(batteryX, batteryY, batteryW, batteryH, (uint16_t*)batterySprite);
 }
 
