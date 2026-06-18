@@ -2,11 +2,13 @@
 #include "display_manager.h"
 
 #include <WiFi.h>
-#include <WebServer.h>
+#include <ESPAsyncWebServer.h>
 #include <DNSServer.h>
 #include <Preferences.h>
 #include <LittleFS.h>
 #include <functional>
+
+#include <ElegantOTA.h>
 
 // Pull compile-time defaults from settings.h (or the example fallback).
 #if __has_include("settings.h")
@@ -265,12 +267,37 @@ String buildConfigPage(const Configuration& cfg)
     html.replace("{{BKK_API_KEY}}", htmlEscape(cfg.bkkApiKey()));
     html.replace("{{BUS_STOP_ID}}", htmlEscape(cfg.busStopId()));
     html.replace("{{TRAIN_STOP_ID}}", htmlEscape(cfg.trainStopId()));
+
+    // Backward compatibility: if an older filesystem template is still served,
+    // inject a visible OTA link block before </body>.
+    if (html.indexOf("href='/update'") < 0)
+    {
+        const char* otaBlock =
+            "<div style='margin-top:14px'>"
+            "<a href='/update' style='display:inline-block;padding:10px 14px;border-radius:8px;background:#2563eb;color:#fff;font-weight:700;text-decoration:none'>Update firmware</a>"
+            "</div>";
+
+        const int bodyClosePos = html.lastIndexOf("</body>");
+        if (bodyClosePos >= 0)
+        {
+            html = html.substring(0, bodyClosePos) + otaBlock + html.substring(bodyClosePos);
+        }
+        else
+        {
+            html += otaBlock;
+        }
+    }
     
     return html;
 }
 
-void sendValidationError(WebServer& server, const char* message)
+void sendValidationError(AsyncWebServerRequest* request, const char* message)
 {
+    if (request == nullptr)
+    {
+        return;
+    }
+
     String html;
     html.reserve(600);
     html += F("<!doctype html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>");
@@ -278,53 +305,113 @@ void sendValidationError(WebServer& server, const char* message)
     html += F("<h2>Validation error</h2><p>");
     html += htmlEscape(message);
     html += F("</p><p><a href='/'>Back to configuration</a></p></body></html>");
-    server.send(400, "text/html", html);
+    request->send(400, "text/html", html);
 }
 
-void sendPortalRedirect(WebServer& server)
+void sendPortalRedirect(AsyncWebServerRequest* request)
 {
-    server.sendHeader("Location", "/", true);
-    server.send(302, "text/plain", "Redirecting to portal");
-}
-
-const char* httpMethodToString(HTTPMethod method)
-{
-    switch (method)
+    if (request == nullptr)
     {
-        case HTTP_GET: return "GET";
-        case HTTP_POST: return "POST";
-        case HTTP_PUT: return "PUT";
-        case HTTP_PATCH: return "PATCH";
-        case HTTP_DELETE: return "DELETE";
-        case HTTP_OPTIONS: return "OPTIONS";
-        case HTTP_HEAD: return "HEAD";
-        default: return "OTHER";
+        return;
     }
+
+    request->redirect("/");
 }
 
-void logWebRequest(WebServer& server, const char* handlerName)
+const char* httpMethodToString(WebRequestMethodComposite method)
 {
+    if ((method & HTTP_GET) == HTTP_GET)
+    {
+        return "GET";
+    }
+    if ((method & HTTP_POST) == HTTP_POST)
+    {
+        return "POST";
+    }
+    if ((method & HTTP_PUT) == HTTP_PUT)
+    {
+        return "PUT";
+    }
+    if ((method & HTTP_PATCH) == HTTP_PATCH)
+    {
+        return "PATCH";
+    }
+    if ((method & HTTP_DELETE) == HTTP_DELETE)
+    {
+        return "DELETE";
+    }
+    if ((method & HTTP_OPTIONS) == HTTP_OPTIONS)
+    {
+        return "OPTIONS";
+    }
+    if ((method & HTTP_HEAD) == HTTP_HEAD)
+    {
+        return "HEAD";
+    }
+    return "OTHER";
+}
+
+String requestArg(AsyncWebServerRequest* request, const char* name)
+{
+    if (request == nullptr || name == nullptr)
+    {
+        return String();
+    }
+
+    if (request->hasParam(name, true))
+    {
+        return request->getParam(name, true)->value();
+    }
+    if (request->hasParam(name))
+    {
+        return request->getParam(name)->value();
+    }
+
+    return String();
+}
+
+bool hasRequestArg(AsyncWebServerRequest* request, const char* name)
+{
+    if (request == nullptr || name == nullptr)
+    {
+        return false;
+    }
+    return request->hasParam(name, true) || request->hasParam(name);
+}
+
+void logWebRequest(AsyncWebServerRequest* request, const char* handlerName)
+{
+    if (request == nullptr)
+    {
+        return;
+    }
+
     Serial.printf("[CONFIG][WEB] %s %s -> %s\n",
-                  httpMethodToString(server.method()),
-                  server.uri().c_str(),
+                  httpMethodToString(request->method()),
+                  request->url().c_str(),
                   handlerName);
 }
 
-void sendRebootResponse(WebServer& server, bool isHu)
+void sendRebootResponse(AsyncWebServerRequest* request, bool isHu)
 {
+    if (request == nullptr)
+    {
+        return;
+    }
+
     if (isHu)
     {
-        server.send(200,
-                    "text/html",
-                    "<!doctype html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>Ujrainditas</title></head>"
-                    "<body style='font-family:Verdana,sans-serif;margin:16px'><h2>ESP ujrainditas...</h2><p>Par masodperc mulva toltsd ujra az oldalt.</p></body></html>");
+        request->send(200,
+                      "text/html",
+                      "<!doctype html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>Ujrainditas</title></head>"
+                      "<body style='font-family:Verdana,sans-serif;margin:16px'><h2>ESP ujrainditas...</h2><p>Par masodperc mulva toltsd ujra az oldalt.</p></body></html>");
     }
     else
     {
-        server.send(200,
-                    "text/html",
-                    "<!doctype html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>Reboot</title></head>"
-                    "<body style='font-family:Verdana,sans-serif;margin:16px'><h2>ESP rebooting...</h2><p>Reload this page in a few seconds.</p></body></html>");
+        request->send(200,
+                      "text/html",
+                      "<!doctype html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>Reboot</title></head>"
+                      "<body style='font-family:Verdana,sans-serif;margin:16px'><h2>ESP rebooting...</h2><p>Reload this page in a few seconds.</p></body></html>");
     }
 }
 }
@@ -533,18 +620,36 @@ bool Configuration::beginConfigMode()
 
     if (m_webServer == nullptr)
     {
-        m_webServer = new WebServer(80);
+        m_webServer = new AsyncWebServer(80);
     }
 
     if (m_webServer == nullptr)
     {
-        Serial.println("[CONFIG] Failed to allocate WebServer.");
+        Serial.println("[CONFIG] Failed to allocate AsyncWebServer.");
         return false;
     }
 
     if (!m_webRoutesRegistered)
     {
         setupWebServerRoutes();
+        ElegantOTA.begin(m_webServer);
+        ElegantOTA.onStart([]() {
+            Serial.println("[CONFIG][OTA] OTA update started.");
+        });
+        ElegantOTA.onProgress([](size_t current, size_t final) {
+            static unsigned long lastLogMs = 0;
+            const unsigned long nowMs = millis();
+            if (nowMs - lastLogMs >= 1000)
+            {
+                lastLogMs = nowMs;
+                Serial.printf("[CONFIG][OTA] Progress: %u / %u bytes\n",
+                              static_cast<unsigned int>(current),
+                              static_cast<unsigned int>(final));
+            }
+        });
+        ElegantOTA.onEnd([](bool success) {
+            Serial.printf("[CONFIG][OTA] OTA update finished: %s\n", success ? "success" : "failed");
+        });
         m_webRoutesRegistered = true;
     }
 
@@ -580,7 +685,7 @@ bool Configuration::beginConfigMode()
 
 void Configuration::handleConfigMode()
 {
-    if (!m_configModeActive || m_webServer == nullptr)
+    if (!m_configModeActive)
     {
         return;
     }
@@ -590,7 +695,7 @@ void Configuration::handleConfigMode()
         m_dnsServer->processNextRequest();
     }
 
-    m_webServer->handleClient();
+    ElegantOTA.loop();
 
     if (m_rebootPending && static_cast<int32_t>(millis() - m_rebootAtMs) >= 0)
     {
@@ -782,162 +887,191 @@ void Configuration::setupWebServerRoutes()
         return;
     }
 
-    m_webServer->on("/", HTTP_GET, std::bind(&Configuration::handleRootGet, this));
+    m_webServer->on("/", HTTP_GET, [this](AsyncWebServerRequest* request) {
+        handleRootGet(request);
+    });
 
     // Common captive portal probes across major clients.
-    m_webServer->on("/generate_204", HTTP_GET, std::bind(&Configuration::handleCaptiveProbeGet, this));
-    m_webServer->on("/gen_204", HTTP_GET, std::bind(&Configuration::handleCaptiveProbeGet, this));
-    m_webServer->on("/hotspot-detect.html", HTTP_GET, std::bind(&Configuration::handleCaptiveProbeGet, this));
-    m_webServer->on("/ncsi.txt", HTTP_GET, std::bind(&Configuration::handleCaptiveProbeGet, this));
-    m_webServer->on("/connecttest.txt", HTTP_GET, std::bind(&Configuration::handleCaptiveProbeGet, this));
-    m_webServer->on("/redirect", HTTP_GET, std::bind(&Configuration::handleCaptiveProbeGet, this));
+    m_webServer->on("/generate_204", HTTP_GET, [this](AsyncWebServerRequest* request) {
+        handleCaptiveProbeGet(request);
+    });
+    m_webServer->on("/gen_204", HTTP_GET, [this](AsyncWebServerRequest* request) {
+        handleCaptiveProbeGet(request);
+    });
+    m_webServer->on("/hotspot-detect.html", HTTP_GET, [this](AsyncWebServerRequest* request) {
+        handleCaptiveProbeGet(request);
+    });
+    m_webServer->on("/ncsi.txt", HTTP_GET, [this](AsyncWebServerRequest* request) {
+        handleCaptiveProbeGet(request);
+    });
+    m_webServer->on("/connecttest.txt", HTTP_GET, [this](AsyncWebServerRequest* request) {
+        handleCaptiveProbeGet(request);
+    });
+    m_webServer->on("/redirect", HTTP_GET, [this](AsyncWebServerRequest* request) {
+        handleCaptiveProbeGet(request);
+    });
 
-    m_webServer->on("/save", HTTP_POST, std::bind(&Configuration::handleSavePost, this));
-    m_webServer->on("/reboot", HTTP_POST, std::bind(&Configuration::handleRebootPost, this));
-    m_webServer->on("/reboot-now", HTTP_GET, std::bind(&Configuration::handleRebootNowGet, this));
-    m_webServer->on("/api/settings", HTTP_GET, std::bind(&Configuration::handleApiSettingsGet, this));
+    m_webServer->on("/save", HTTP_POST, [this](AsyncWebServerRequest* request) {
+        handleSavePost(request);
+    });
+    m_webServer->on("/reboot", HTTP_POST, [this](AsyncWebServerRequest* request) {
+        handleRebootPost(request);
+    });
+    m_webServer->on("/reboot-now", HTTP_GET, [this](AsyncWebServerRequest* request) {
+        handleRebootNowGet(request);
+    });
+    m_webServer->on("/api/settings", HTTP_GET, [this](AsyncWebServerRequest* request) {
+        handleApiSettingsGet(request);
+    });
 
-    m_webServer->onNotFound(std::bind(&Configuration::handleNotFound, this));
+    m_webServer->onNotFound([this](AsyncWebServerRequest* request) {
+        handleNotFound(request);
+    });
 }
 
-void Configuration::handleRootGet()
+void Configuration::handleRootGet(AsyncWebServerRequest* request)
 {
-    if (m_webServer == nullptr)
+    if (request == nullptr)
     {
         return;
     }
 
-    logWebRequest(*m_webServer, "handleRootGet");
-    m_webServer->send(200, "text/html", buildConfigPage(*this));
+    logWebRequest(request, "handleRootGet");
+
+    AsyncWebServerResponse* response = request->beginResponse(200, "text/html", buildConfigPage(*this));
+    response->addHeader("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
+    response->addHeader("Pragma", "no-cache");
+    response->addHeader("Expires", "0");
+    request->send(response);
 }
 
-void Configuration::handleCaptiveProbeGet()
+void Configuration::handleCaptiveProbeGet(AsyncWebServerRequest* request)
 {
-    if (m_webServer == nullptr)
+    if (request == nullptr)
     {
         return;
     }
 
-    logWebRequest(*m_webServer, "handleCaptiveProbeGet");
-    sendPortalRedirect(*m_webServer);
+    logWebRequest(request, "handleCaptiveProbeGet");
+    sendPortalRedirect(request);
 }
 
-void Configuration::handleSavePost()
+void Configuration::handleSavePost(AsyncWebServerRequest* request)
 {
-    if (m_webServer == nullptr)
+    if (request == nullptr)
     {
         return;
     }
 
-    logWebRequest(*m_webServer, "handleSavePost");
+    logWebRequest(request, "handleSavePost");
 
-    if (!(m_webServer->hasArg("wifi_ssid") &&
-          m_webServer->hasArg("wifi_password") &&
-          m_webServer->hasArg("mqtt_server") &&
-          m_webServer->hasArg("mqtt_port") &&
-          m_webServer->hasArg("mqtt_departures_topic") &&
-          m_webServer->hasArg("mqtt_weather_topic") &&
-          m_webServer->hasArg("timezone") &&
-          m_webServer->hasArg("weather_data_source") &&
-          m_webServer->hasArg("departures_data_source") &&
-          m_webServer->hasArg("weather_api_provider") &&
-          m_webServer->hasArg("departures_api_provider") &&
-          m_webServer->hasArg("location_name")))
+    if (!(hasRequestArg(request, "wifi_ssid") &&
+          hasRequestArg(request, "wifi_password") &&
+          hasRequestArg(request, "mqtt_server") &&
+          hasRequestArg(request, "mqtt_port") &&
+          hasRequestArg(request, "mqtt_departures_topic") &&
+          hasRequestArg(request, "mqtt_weather_topic") &&
+          hasRequestArg(request, "timezone") &&
+          hasRequestArg(request, "weather_data_source") &&
+          hasRequestArg(request, "departures_data_source") &&
+          hasRequestArg(request, "weather_api_provider") &&
+          hasRequestArg(request, "departures_api_provider") &&
+          hasRequestArg(request, "location_name")))
     {
-        sendValidationError(*m_webServer, "Missing required fields.");
+        sendValidationError(request, "Missing required fields.");
         return;
     }
 
-    const String wifiSsid = trimCopy(m_webServer->arg("wifi_ssid"));
-    const String wifiPassword = trimCopy(m_webServer->arg("wifi_password"));
-    const String mqttServer = trimCopy(m_webServer->arg("mqtt_server"));
-    const String mqttPortText = trimCopy(m_webServer->arg("mqtt_port"));
-    const String depTopic = trimCopy(m_webServer->arg("mqtt_departures_topic"));
-    const String weatherTopic = trimCopy(m_webServer->arg("mqtt_weather_topic"));
-    const String timezone = trimCopy(m_webServer->arg("timezone"));
-    const String weatherDataSourceText = trimCopy(m_webServer->arg("weather_data_source"));
-    const String departuresDataSourceText = trimCopy(m_webServer->arg("departures_data_source"));
-    const String weatherApiProviderText = trimCopy(m_webServer->arg("weather_api_provider"));
-    const String departuresApiProviderText = trimCopy(m_webServer->arg("departures_api_provider"));
-    const String locationName = trimCopy(m_webServer->arg("location_name"));
-    const String bkkApiKey = trimCopy(m_webServer->arg("bkk_api_key"));
-    const String busStopId = trimCopy(m_webServer->arg("bus_stop_id"));
-    const String trainStopId = trimCopy(m_webServer->arg("train_stop_id"));
+    const String wifiSsid = trimCopy(requestArg(request, "wifi_ssid"));
+    const String wifiPassword = trimCopy(requestArg(request, "wifi_password"));
+    const String mqttServer = trimCopy(requestArg(request, "mqtt_server"));
+    const String mqttPortText = trimCopy(requestArg(request, "mqtt_port"));
+    const String depTopic = trimCopy(requestArg(request, "mqtt_departures_topic"));
+    const String weatherTopic = trimCopy(requestArg(request, "mqtt_weather_topic"));
+    const String timezone = trimCopy(requestArg(request, "timezone"));
+    const String weatherDataSourceText = trimCopy(requestArg(request, "weather_data_source"));
+    const String departuresDataSourceText = trimCopy(requestArg(request, "departures_data_source"));
+    const String weatherApiProviderText = trimCopy(requestArg(request, "weather_api_provider"));
+    const String departuresApiProviderText = trimCopy(requestArg(request, "departures_api_provider"));
+    const String locationName = trimCopy(requestArg(request, "location_name"));
+    const String bkkApiKey = trimCopy(requestArg(request, "bkk_api_key"));
+    const String busStopId = trimCopy(requestArg(request, "bus_stop_id"));
+    const String trainStopId = trimCopy(requestArg(request, "train_stop_id"));
 
     if (wifiSsid.isEmpty() || wifiSsid.length() > (sizeof(m_wifiSsid) - 1) || !isAsciiPrintableNoCtrl(wifiSsid))
     {
-        sendValidationError(*m_webServer, "Invalid WiFi SSID (1-63 printable ASCII chars).");
+        sendValidationError(request, "Invalid WiFi SSID (1-63 printable ASCII chars).");
         return;
     }
 
     if (wifiPassword.length() < 8 || wifiPassword.length() > (sizeof(m_wifiPassword) - 1) || !isAsciiPrintableNoCtrl(wifiPassword))
     {
-        sendValidationError(*m_webServer, "Invalid WiFi password (8-63 printable ASCII chars).");
+        sendValidationError(request, "Invalid WiFi password (8-63 printable ASCII chars).");
         return;
     }
 
     if (!isValidHostOrIpv4(mqttServer))
     {
-        sendValidationError(*m_webServer, "Invalid MQTT server host/IP.");
+        sendValidationError(request, "Invalid MQTT server host/IP.");
         return;
     }
 
     const long port = mqttPortText.toInt();
     if (port <= 0 || port > 65535)
     {
-        sendValidationError(*m_webServer, "Invalid MQTT port (1-65535).");
+        sendValidationError(request, "Invalid MQTT port (1-65535).");
         return;
     }
 
     if (!isValidMqttTopic(depTopic))
     {
-        sendValidationError(*m_webServer, "Invalid departures MQTT topic.");
+        sendValidationError(request, "Invalid departures MQTT topic.");
         return;
     }
 
     if (!isValidMqttTopic(weatherTopic))
     {
-        sendValidationError(*m_webServer, "Invalid weather MQTT topic.");
+        sendValidationError(request, "Invalid weather MQTT topic.");
         return;
     }
 
     if (!isAllowedTimezoneValue(timezone))
     {
-        sendValidationError(*m_webServer, "Invalid timezone selection.");
+        sendValidationError(request, "Invalid timezone selection.");
         return;
     }
 
     if (locationName.isEmpty() || locationName.length() > (sizeof(m_locationName) - 1))
     {
-        sendValidationError(*m_webServer, "Invalid location name (1-48 chars).");
+        sendValidationError(request, "Invalid location name (1-48 chars).");
         return;
     }
 
     const long weatherDataSourceVal = weatherDataSourceText.toInt();
     if (weatherDataSourceVal < 0 || weatherDataSourceVal > 1)
     {
-        sendValidationError(*m_webServer, "Invalid weather data source.");
+        sendValidationError(request, "Invalid weather data source.");
         return;
     }
 
     const long departuresDataSourceVal = departuresDataSourceText.toInt();
     if (departuresDataSourceVal < 0 || departuresDataSourceVal > 1)
     {
-        sendValidationError(*m_webServer, "Invalid departures data source.");
+        sendValidationError(request, "Invalid departures data source.");
         return;
     }
 
     const long weatherApiProviderVal = weatherApiProviderText.toInt();
     if (weatherApiProviderVal < 0 || weatherApiProviderVal > 1)
     {
-        sendValidationError(*m_webServer, "Invalid weather API provider.");
+        sendValidationError(request, "Invalid weather API provider.");
         return;
     }
 
     const long departuresApiProviderVal = departuresApiProviderText.toInt();
     if (departuresApiProviderVal < 0 || departuresApiProviderVal > 1)
     {
-        sendValidationError(*m_webServer, "Invalid departures API provider.");
+        sendValidationError(request, "Invalid departures API provider.");
         return;
     }
 
@@ -967,55 +1101,54 @@ void Configuration::handleSavePost()
     save();
     renderConfigScreen();
 
-    m_webServer->sendHeader("Location", "/", true);
-    m_webServer->send(303, "text/plain", "Saved");
+    request->redirect("/");
 }
 
-void Configuration::handleRebootPost()
+void Configuration::handleRebootPost(AsyncWebServerRequest* request)
 {
-    if (m_webServer == nullptr)
+    if (request == nullptr)
     {
         return;
     }
 
-    logWebRequest(*m_webServer, "handleRebootPost");
+    logWebRequest(request, "handleRebootPost");
     Serial.println("[CONFIG] /reboot requested (POST).");
 
-    const String uiLang = m_webServer->hasArg("ui_lang") ? m_webServer->arg("ui_lang") : "en";
+    const String uiLang = requestArg(request, "ui_lang");
     const bool isHu = uiLang.equalsIgnoreCase("hu");
 
-    sendRebootResponse(*m_webServer, isHu);
+    sendRebootResponse(request, isHu);
 
     delay(350);
     ESP.restart();
 }
 
-void Configuration::handleRebootNowGet()
+void Configuration::handleRebootNowGet(AsyncWebServerRequest* request)
 {
-    if (m_webServer == nullptr)
+    if (request == nullptr)
     {
         return;
     }
 
-    logWebRequest(*m_webServer, "handleRebootNowGet");
+    logWebRequest(request, "handleRebootNowGet");
     Serial.println("[CONFIG] /reboot-now requested (GET fallback).");
-    const String uiLang = m_webServer->hasArg("ui_lang") ? m_webServer->arg("ui_lang") : "en";
+    const String uiLang = requestArg(request, "ui_lang");
     const bool isHu = uiLang.equalsIgnoreCase("hu");
 
-    sendRebootResponse(*m_webServer, isHu);
+    sendRebootResponse(request, isHu);
 
     delay(350);
     ESP.restart();
 }
 
-void Configuration::handleApiSettingsGet()
+void Configuration::handleApiSettingsGet(AsyncWebServerRequest* request)
 {
-    if (m_webServer == nullptr)
+    if (request == nullptr)
     {
         return;
     }
 
-    logWebRequest(*m_webServer, "handleApiSettingsGet");
+    logWebRequest(request, "handleApiSettingsGet");
 
     String json;
     json.reserve(512);
@@ -1048,16 +1181,16 @@ void Configuration::handleApiSettingsGet()
     json += locationName();
     json += "\"";
     json += "}";
-    m_webServer->send(200, "application/json", json);
+    request->send(200, "application/json", json);
 }
 
-void Configuration::handleNotFound()
+void Configuration::handleNotFound(AsyncWebServerRequest* request)
 {
-    if (m_webServer == nullptr)
+    if (request == nullptr)
     {
         return;
     }
 
-    logWebRequest(*m_webServer, "handleNotFound");
-    sendPortalRedirect(*m_webServer);
+    logWebRequest(request, "handleNotFound");
+    sendPortalRedirect(request);
 }

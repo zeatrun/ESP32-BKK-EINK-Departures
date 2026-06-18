@@ -10,9 +10,11 @@
     label { display: block; margin: 10px 0 4px; font-weight: 600; }
     input, select { width: 100%; padding: 10px; border: 1px solid #cbd5e1; border-radius: 8px; box-sizing: border-box; }
     .hint { font-size: .82rem; color: #475569; margin-top: 3px; }
-    button { margin-top: 14px; padding: 10px 14px; border: 0; border-radius: 8px; background: #0f766e; color: #fff; font-weight: 700; cursor: pointer; }
+    button { margin-top: 14px; padding: 10px 14px; border: 0; border-radius: 8px; background: #0f766e; color: #fff; font-weight: 700; cursor: pointer; min-height: 42px; display: inline-flex; align-items: center; justify-content: center; }
     button.secondary { background: #b91c1c; }
     .actions { display: flex; gap: 10px; flex-wrap: wrap; }
+    .actions > form { margin: 0; }
+    .link-button { margin-top: 14px; padding: 10px 14px; border-radius: 8px; background: #2563eb; color: #fff; font-weight: 700; text-decoration: none; min-height: 42px; display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box; }
     .card { max-width: 720px; margin: 0 auto; background: #fff; padding: 16px; border-radius: 12px; box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08); }
     .meta { font-size: .9rem; color: #334155; margin-bottom: 10px; }
   </style>
@@ -25,7 +27,7 @@
       AP Password: <b>{{AP_PASSWORD}}</b>
     </div>
 
-    <form method='post' action='/save'>
+    <form id='config-form' method='post' action='/save'>
       <label for='wifi_ssid'>WiFi SSID</label>
       <input id='wifi_ssid' name='wifi_ssid' value='{{WIFI_SSID}}' required minlength='1' maxlength='63' autocomplete='off'>
       <div class='hint'>1-63 characters</div>
@@ -98,12 +100,11 @@
       <input id='train_stop_id' name='train_stop_id' value='{{TRAIN_STOP_ID}}' maxlength='63' autocomplete='off'>
       <div class='hint'>e.g., BKK_005501438_0</div>
 
-      <div class='actions'>
-        <button type='submit'>Save</button>
-      </div>
     </form>
 
     <div class='actions'>
+      <button type='submit' form='config-form'>Save</button>
+      <a class='link-button' href='/update'>Update firmware</a>
       <form method='post' action='/reboot'>
         <button class='secondary' type='submit'>Reboot ESP</button>
       </form>

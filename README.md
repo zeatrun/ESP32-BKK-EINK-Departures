@@ -27,6 +27,9 @@ It is designed for low-noise updates on e-paper and for robust operation with re
 - Build system: PlatformIO
 - MQTT client: PubSubClient
 - JSON parser: ArduinoJson
+- Config/OTA web server: ESPAsyncWebServer (async)
+- OTA UI: ElegantOTA (async mode)
+- Async TCP layer: AsyncTCP (ESP32)
 - Captive DNS: DNSServer (Arduino-ESP32)
 - QR generator: QRCode
 - Graphics driver: Seeed_GFX (local library in lib/Seeed_GFX-master)
@@ -300,14 +303,41 @@ How to enter config mode:
 
 What happens in config mode:
 - the board starts a dedicated AP with generated SSID/password
+- an async HTTP server starts for both configuration and OTA pages
 - a captive DNS server redirects common connectivity-check URLs to the local page
 - unknown HTTP paths are redirected to the config page
 - the config page is loaded from LittleFS file [data/config_page.html](data/config_page.html) as `/config_page.html`
+- the default landing page is the config page (`/`)
+- the page has one action row with `Save`, `Update firmware`, and `Reboot ESP` buttons
+- `Update firmware` opens ElegantOTA at `/update`
 - the display shows configuration data and a Wi-Fi QR code for quick AP join
 
 Notes:
 - Captive portal behavior depends on client OS heuristics (Android/iOS/Windows), but direct open to `http://192.168.4.1` always works.
 - Settings saved on the page are persisted to NVS and restored on next boot.
+
+## OTA Update (ElegantOTA)
+
+Firmware update is available directly from config mode using ElegantOTA in async mode.
+
+How to open OTA page:
+- enter config mode (AP mode)
+- open `http://192.168.4.1`
+- click `Update firmware`
+- or open `http://192.168.4.1/update` directly
+
+What you can update:
+- application firmware (`.bin`)
+- filesystem image (`littlefs.bin`) if needed
+
+Current behavior in this project:
+- config portal and OTA share the same async server instance
+- OTA progress/start/end events are logged to Serial
+- after successful OTA, ElegantOTA reboots the device automatically
+
+Notes:
+- in this setup, OTA page is currently without username/password protection
+- if you need protection, add credentials to `ElegantOTA.begin(...)` in [src/configuration.cpp](src/configuration.cpp)
 
 ## Build and Flash
 
@@ -330,6 +360,18 @@ Filesystem (LittleFS) commands:
 	 - platformio run --target uploadfs
 
 You only need filesystem upload when files under [data](data) change (fonts/images/web assets).
+
+Recommended update flows:
+
+1. Firmware-only change
+	- `platformio run -t upload`
+2. Web page/font/assets change (LittleFS content)
+	- `platformio run -t buildfs`
+	- `platformio run -t uploadfs`
+3. Both firmware and filesystem changed
+	- `platformio run -t buildfs`
+	- `platformio run -t uploadfs`
+	- `platformio run -t upload`
 
 Config portal web page in filesystem:
 - [data/config_page.html](data/config_page.html) is uploaded as `/config_page.html` and rendered by the web server
@@ -497,6 +539,12 @@ From project root:
 - Config page shows "Configuration page missing":
 	- verify [data/config_page.html](data/config_page.html) exists
 	- run `buildfs` + `uploadfs` to refresh LittleFS contents
+- OTA button is missing on config page:
+	- hard refresh browser (`Ctrl+F5`) or use private/incognito window
+	- ensure both firmware and filesystem are up to date (`upload` and `uploadfs`)
+- OTA page not reachable:
+	- open `http://192.168.4.1/update` directly
+	- verify serial logs show config mode AP started
 
 ## License
 
