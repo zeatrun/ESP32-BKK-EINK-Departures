@@ -1118,6 +1118,8 @@ void Configuration::handleSavePost(AsyncWebServerRequest* request)
     const String weatherApiProviderText = trimCopy(requestArg(request, "weather_api_provider"));
     const String departuresApiProviderText = trimCopy(requestArg(request, "departures_api_provider"));
     const String locationName = trimCopy(requestArg(request, "location_name"));
+    const String locationLatText = hasRequestArg(request, "location_lat") ? trimCopy(requestArg(request, "location_lat")) : String();
+    const String locationLonText = hasRequestArg(request, "location_lon") ? trimCopy(requestArg(request, "location_lon")) : String();
     const String bkkApiKey = trimCopy(requestArg(request, "bkk_api_key"));
     const String busStopId = trimCopy(requestArg(request, "bus_stop_id"));
     const String trainStopId = trimCopy(requestArg(request, "train_stop_id"));
@@ -1170,7 +1172,6 @@ void Configuration::handleSavePost(AsyncWebServerRequest* request)
         sendValidationError(request, "Invalid location name (1-48 chars).");
         return;
     }
-
     float locationLat = 0.0f, locationLon = 0.0f;
     if (!locationLatText.isEmpty() && !locationLonText.isEmpty())
     {
@@ -1218,14 +1219,14 @@ void Configuration::handleSavePost(AsyncWebServerRequest* request)
     {
         if (locationName.isEmpty())
         {
-            sendValidationError(*m_webServer, "Location is required when weather source is Direct API.");
+            sendValidationError(request, "Location is required when weather source is Direct API.");
             return;
         }
 
         if (locationLat == 0.0f && locationLon == 0.0f &&
             !findKnownLocationCoordinates(locationName.c_str(), locationLat, locationLon))
         {
-            sendValidationError(*m_webServer,
+            sendValidationError(request,
                                 "Unknown location. Select a suggestion from the list or use one of the built-in cities.");
             return;
         }
