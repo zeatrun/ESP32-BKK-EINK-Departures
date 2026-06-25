@@ -115,14 +115,20 @@ public:
     void setWeatherApiProvider(WeatherApiProvider provider);
     void setDeparturesApiProvider(DeparturesApiProvider provider);
     void setLocationName(const char* location);
+    void setLocationCoordinates(float lat, float lon);
     void setBkkApiKey(const char* key);
     void setBusStopId(const char* stopId);
     void setTrainStopId(const char* stopId);
 
+    float locationLat() const { return m_locationLat; }
+    float locationLon() const { return m_locationLon; }
+
     /**
-     * Helper: resolve city name to latitude/longitude (static lookup table).
-     * Returns true if the city was found, false otherwise.
-     * On success, lat and lon are filled with the city coordinates.
+     * Helper: resolve city name to latitude/longitude.
+     * First checks stored coordinates (set when a city is selected from the
+     * geocoding autocomplete on the config page). Falls back to a static
+     * lookup table for the handful of pre-defined Hungarian cities.
+     * Returns true if coordinates could be determined, false otherwise.
      */
     bool resolveLocationCoordinates(const char* city, float& lat, float& lon);
 
@@ -138,6 +144,8 @@ private:
     WeatherApiProvider m_weatherApiProvider = WeatherApiProvider::OpenMeteo;
     DeparturesApiProvider m_departuresApiProvider = DeparturesApiProvider::Bkk;
     char     m_locationName[48]           = {}; // e.g., "Budapest"
+    float    m_locationLat                = 0.0f; // 0 = not set (use static table)
+    float    m_locationLon                = 0.0f;
     char     m_bkkApiKey[128]             = {};
     char     m_busStopId[64]              = {};
     char     m_trainStopId[64]            = {};

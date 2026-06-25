@@ -262,6 +262,13 @@ String buildConfigPage(const Configuration& cfg)
     html.replace("{{DEPARTURES_API_MOCK}}", cfg.departuresApiProvider() == Configuration::DeparturesApiProvider::MockData ? "selected" : "");
     
     html.replace("{{LOCATION_NAME}}", htmlEscape(cfg.locationName()));
+    {
+        char latBuf[16], lonBuf[16];
+        snprintf(latBuf, sizeof(latBuf), "%.6f", cfg.locationLat());
+        snprintf(lonBuf, sizeof(lonBuf), "%.6f", cfg.locationLon());
+        html.replace("{{LOCATION_LAT}}", latBuf);
+        html.replace("{{LOCATION_LON}}", lonBuf);
+    }
     html.replace("{{BKK_API_KEY}}", htmlEscape(cfg.bkkApiKey()));
     html.replace("{{BUS_STOP_ID}}", htmlEscape(cfg.busStopId()));
     html.replace("{{TRAIN_STOP_ID}}", htmlEscape(cfg.trainStopId()));
@@ -375,6 +382,8 @@ void Configuration::load()
     const uint8_t weatherApiProvider = prefs.getUChar("wth_api", static_cast<uint8_t>(WeatherApiProvider::OpenMeteo));
     const uint8_t departuresApiProvider = prefs.getUChar("dep_api", static_cast<uint8_t>(DeparturesApiProvider::Bkk));
     const String locationName = prefs.getString("location", m_locationName);
+    const float locationLat = prefs.getFloat("loc_lat", 0.0f);
+    const float locationLon = prefs.getFloat("loc_lon", 0.0f);
     const String bkkApiKey = prefs.getString("bkk_key", m_bkkApiKey);
     const bool hasBusStopKey = prefs.isKey("bus_stop");
     const bool hasTrainStopKey = prefs.isKey("train_stop");
@@ -407,6 +416,8 @@ void Configuration::load()
     m_weatherApiProvider = static_cast<WeatherApiProvider>(weatherApiProvider);
     m_departuresApiProvider = static_cast<DeparturesApiProvider>(departuresApiProvider);
     strlcpy(m_locationName, locationName.c_str(), sizeof(m_locationName));
+    m_locationLat = locationLat;
+    m_locationLon = locationLon;
     strlcpy(m_bkkApiKey, bkkApiKey.c_str(), sizeof(m_bkkApiKey));
     strlcpy(m_busStopId, busStopId.c_str(), sizeof(m_busStopId));
     strlcpy(m_trainStopId, trainStopId.c_str(), sizeof(m_trainStopId));
@@ -469,6 +480,8 @@ void Configuration::save()
     prefs.putUChar("wth_api", static_cast<uint8_t>(m_weatherApiProvider));
     prefs.putUChar("dep_api", static_cast<uint8_t>(m_departuresApiProvider));
     prefs.putString("location", m_locationName);
+    prefs.putFloat("loc_lat", m_locationLat);
+    prefs.putFloat("loc_lon", m_locationLon);
     prefs.putString("bkk_key", m_bkkApiKey);
     prefs.putString("bus_stop", m_busStopId);
     prefs.putString("train_stop", m_trainStopId);
@@ -683,6 +696,12 @@ void Configuration::setLocationName(const char* location)
     }
 }
 
+void Configuration::setLocationCoordinates(float lat, float lon)
+{
+    m_locationLat = lat;
+    m_locationLon = lon;
+}
+
 void Configuration::setBkkApiKey(const char* key)
 {
     if (key != nullptr)
@@ -709,7 +728,15 @@ void Configuration::setTrainStopId(const char* stopId)
 
 bool Configuration::resolveLocationCoordinates(const char* city, float& lat, float& lon)
 {
-    // Simple static lookup table for Hungarian cities
+    // If coordinates were stored from the geocoding autocomplete, use them directly.
+    if (m_locationLat != 0.0f || m_locationLon != 0.0f)
+    {
+        lat = m_locationLat;
+        lon = m_locationLon;
+        return true;
+    }
+
+    // Fallback: static lookup table for a handful of pre-defined Hungarian cities.
     const struct {
         const char* name;
         float latitude;
@@ -860,6 +887,8 @@ void Configuration::handleSavePost()
     const String weatherApiProviderText = trimCopy(m_webServer->arg("weather_api_provider"));
     const String departuresApiProviderText = trimCopy(m_webServer->arg("departures_api_provider"));
     const String locationName = trimCopy(m_webServer->arg("location_name"));
+    const String locationLatText = m_webServer->hasArg("location_lat") ? trimCopy(m_webServer->arg("location_lat")) : String();
+    const String locationLonText = m_webServer->hasArg("location_lon") ? trimCopy(m_webServer->arg("location_lon")) : String();
     const String bkkApiKey = trimCopy(m_webServer->arg("bkk_api_key"));
     const String busStopId = trimCopy(m_webServer->arg("bus_stop_id"));
     const String trainStopId = trimCopy(m_webServer->arg("train_stop_id"));
@@ -913,6 +942,19 @@ void Configuration::handleSavePost()
         return;
     }
 
+    float locationLat = 0.0f, locationLon = 0.0f;
+    if (!locationLatText.isEmpty() && !locationLonText.isEmpty())
+    {
+        const float parsedLat = locationLatText.toFloat();
+        const float parsedLon = locationLonText.toFloat();
+        if (parsedLat >= -90.0f && parsedLat <= 90.0f &&
+            parsedLon >= -180.0f && parsedLon <= 180.0f)
+        {
+            locationLat = parsedLat;
+            locationLon = parsedLon;
+        }
+    }
+
     const long weatherDataSourceVal = weatherDataSourceText.toInt();
     if (weatherDataSourceVal < 0 || weatherDataSourceVal > 1)
     {
@@ -960,6 +1002,7 @@ void Configuration::handleSavePost()
     setWeatherApiProvider(static_cast<WeatherApiProvider>(weatherApiProviderVal));
     setDeparturesApiProvider(static_cast<DeparturesApiProvider>(departuresApiProviderVal));
     setLocationName(locationName.c_str());
+    setLocationCoordinates(locationLat, locationLon);
     setBkkApiKey(bkkApiKey.c_str());
     setBusStopId(busStopId.c_str());
     setTrainStopId(trainStopId.c_str());
