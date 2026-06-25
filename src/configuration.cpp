@@ -6,6 +6,8 @@
 #include <DNSServer.h>
 #include <Preferences.h>
 #include <LittleFS.h>
+#include <HTTPClient.h>
+#include <WiFiClientSecure.h>
 #include <functional>
 
 #include <ElegantOTA.h>
@@ -128,6 +130,15 @@ struct TimezoneOption
     const char* labelHu;
 };
 
+struct KnownLocation
+{
+    const char* name;
+    const char* admin1;
+    const char* country;
+    float latitude;
+    float longitude;
+};
+
 constexpr TimezoneOption TIMEZONE_OPTIONS[] = {
     {"UTC0", "UTC", "UTC"},
     {"CET-1CEST,M3.5.0,M10.5.0/3", "Budapest (CET/CEST)", "Budapest (CET/CEST)"},
@@ -137,6 +148,19 @@ constexpr TimezoneOption TIMEZONE_OPTIONS[] = {
     {"PST8PDT,M3.2.0,M11.1.0", "Los Angeles (PST/PDT)", "Los Angeles (PST/PDT)"},
     {"JST-9", "Tokyo (JST)", "Tokio (JST)"},
     {"CST-8", "Shanghai (CST)", "Sanghaj (CST)"}
+};
+
+constexpr KnownLocation KNOWN_LOCATIONS[] = {
+    {"Budapest", "Pest", "Hungary", 47.4979f, 19.0402f},
+    {"Pilisvorosvar", "Pest", "Hungary", 47.6108f, 18.9133f},
+    {"Pilisszentivan", "Pest", "Hungary", 47.6130f, 18.9080f},
+    {"Esztergom", "Komarom-Esztergom", "Hungary", 47.7857f, 18.7521f},
+    {"Gyor", "Gyor-Moson-Sopron", "Hungary", 47.6875f, 17.6504f},
+    {"Szeged", "Csongrad-Csanad", "Hungary", 46.2530f, 20.1414f},
+    {"Debrecen", "Hajdu-Bihar", "Hungary", 47.5316f, 21.6273f},
+    {"Pecs", "Baranya", "Hungary", 46.0727f, 18.2323f},
+    {"Miskolc", "Borsod-Abauj-Zemplen", "Hungary", 48.1035f, 20.7784f},
+    {"Szekesfehervar", "Fejer", "Hungary", 47.1860f, 18.4221f},
 };
 
 bool isAllowedTimezoneValue(const String& tz)
@@ -149,6 +173,106 @@ bool isAllowedTimezoneValue(const String& tz)
         }
     }
     return false;
+}
+
+bool findKnownLocationCoordinates(const char* city, float& lat, float& lon)
+{
+    if (!city || strlen(city) == 0)
+    {
+        return false;
+    }
+
+    for (const auto& knownLocation : KNOWN_LOCATIONS)
+    {
+        if (strcasecmp(city, knownLocation.name) == 0)
+        {
+            lat = knownLocation.latitude;
+            lon = knownLocation.longitude;
+            return true;
+        }
+    }
+
+    return false;
+}
+
+String urlEncode(const String& input)
+{
+    String out;
+    out.reserve(input.length() * 3);
+
+    const char* hex = "0123456789ABCDEF";
+    for (size_t i = 0; i < input.length(); ++i)
+    {
+        const unsigned char c = static_cast<unsigned char>(input[i]);
+        const bool isAlphaNum = (c >= 'a' && c <= 'z') ||
+                                (c >= 'A' && c <= 'Z') ||
+                                (c >= '0' && c <= '9');
+        if (isAlphaNum || c == '-' || c == '_' || c == '.' || c == '~')
+        {
+            out += static_cast<char>(c);
+        }
+        else if (c == ' ')
+        {
+            out += "%20";
+        }
+        else
+        {
+            out += '%';
+            out += hex[(c >> 4) & 0x0F];
+            out += hex[c & 0x0F];
+        }
+    }
+
+    return out;
+}
+
+String buildKnownLocationsGeocodeJson(const String& query)
+{
+    String needle = query;
+    needle.toLowerCase();
+
+    String json;
+    json.reserve(700);
+    json += "{\"results\":[";
+
+    bool first = true;
+    uint8_t added = 0;
+    for (const auto& location : KNOWN_LOCATIONS)
+    {
+        String haystack = String(location.name) + " " + location.admin1 + " " + location.country;
+        haystack.toLowerCase();
+        if (!needle.isEmpty() && haystack.indexOf(needle) < 0)
+        {
+            continue;
+        }
+
+        if (!first)
+        {
+            json += ',';
+        }
+        first = false;
+
+        json += "{\"name\":\"";
+        json += location.name;
+        json += "\",\"admin1\":\"";
+        json += location.admin1;
+        json += "\",\"country\":\"";
+        json += location.country;
+        json += "\",\"latitude\":";
+        json += String(location.latitude, 6);
+        json += ",\"longitude\":";
+        json += String(location.longitude, 6);
+        json += "}";
+
+        ++added;
+        if (added >= 10)
+        {
+            break;
+        }
+    }
+
+    json += "]}";
+    return json;
 }
 
 String htmlEscape(const char* input)
@@ -264,6 +388,13 @@ String buildConfigPage(const Configuration& cfg)
     html.replace("{{DEPARTURES_API_MOCK}}", cfg.departuresApiProvider() == Configuration::DeparturesApiProvider::MockData ? "selected" : "");
     
     html.replace("{{LOCATION_NAME}}", htmlEscape(cfg.locationName()));
+    {
+        char latBuf[16], lonBuf[16];
+        snprintf(latBuf, sizeof(latBuf), "%.6f", cfg.locationLat());
+        snprintf(lonBuf, sizeof(lonBuf), "%.6f", cfg.locationLon());
+        html.replace("{{LOCATION_LAT}}", latBuf);
+        html.replace("{{LOCATION_LON}}", lonBuf);
+    }
     html.replace("{{BKK_API_KEY}}", htmlEscape(cfg.bkkApiKey()));
     html.replace("{{BUS_STOP_ID}}", htmlEscape(cfg.busStopId()));
     html.replace("{{TRAIN_STOP_ID}}", htmlEscape(cfg.trainStopId()));
@@ -462,6 +593,8 @@ void Configuration::load()
     const uint8_t weatherApiProvider = prefs.getUChar("wth_api", static_cast<uint8_t>(WeatherApiProvider::OpenMeteo));
     const uint8_t departuresApiProvider = prefs.getUChar("dep_api", static_cast<uint8_t>(DeparturesApiProvider::Bkk));
     const String locationName = prefs.getString("location", m_locationName);
+    const float locationLat = prefs.getFloat("loc_lat", 0.0f);
+    const float locationLon = prefs.getFloat("loc_lon", 0.0f);
     const String bkkApiKey = prefs.getString("bkk_key", m_bkkApiKey);
     const bool hasBusStopKey = prefs.isKey("bus_stop");
     const bool hasTrainStopKey = prefs.isKey("train_stop");
@@ -494,6 +627,8 @@ void Configuration::load()
     m_weatherApiProvider = static_cast<WeatherApiProvider>(weatherApiProvider);
     m_departuresApiProvider = static_cast<DeparturesApiProvider>(departuresApiProvider);
     strlcpy(m_locationName, locationName.c_str(), sizeof(m_locationName));
+    m_locationLat = locationLat;
+    m_locationLon = locationLon;
     strlcpy(m_bkkApiKey, bkkApiKey.c_str(), sizeof(m_bkkApiKey));
     strlcpy(m_busStopId, busStopId.c_str(), sizeof(m_busStopId));
     strlcpy(m_trainStopId, trainStopId.c_str(), sizeof(m_trainStopId));
@@ -556,6 +691,8 @@ void Configuration::save()
     prefs.putUChar("wth_api", static_cast<uint8_t>(m_weatherApiProvider));
     prefs.putUChar("dep_api", static_cast<uint8_t>(m_departuresApiProvider));
     prefs.putString("location", m_locationName);
+    prefs.putFloat("loc_lat", m_locationLat);
+    prefs.putFloat("loc_lon", m_locationLon);
     prefs.putString("bkk_key", m_bkkApiKey);
     prefs.putString("bus_stop", m_busStopId);
     prefs.putString("train_stop", m_trainStopId);
@@ -788,6 +925,12 @@ void Configuration::setLocationName(const char* location)
     }
 }
 
+void Configuration::setLocationCoordinates(float lat, float lon)
+{
+    m_locationLat = lat;
+    m_locationLon = lon;
+}
+
 void Configuration::setBkkApiKey(const char* key)
 {
     if (key != nullptr)
@@ -814,34 +957,15 @@ void Configuration::setTrainStopId(const char* stopId)
 
 bool Configuration::resolveLocationCoordinates(const char* city, float& lat, float& lon)
 {
-    // Simple static lookup table for Hungarian cities
-    const struct {
-        const char* name;
-        float latitude;
-        float longitude;
-    } cities[] = {
-        {"Budapest", 47.4979f, 19.0402f},
-        {"Pilisvorosvar", 47.6108f, 18.9133f},
-        {"Pilisszentivan", 47.6130f, 18.9080f},
-        {"Esztergom", 47.7857f, 18.7521f},
-    };
-
-    if (!city || strlen(city) == 0)
+    // If coordinates were stored from the geocoding autocomplete, use them directly.
+    if (m_locationLat != 0.0f || m_locationLon != 0.0f)
     {
-        return false;
+        lat = m_locationLat;
+        lon = m_locationLon;
+        return true;
     }
 
-    for (const auto& c : cities)
-    {
-        if (strcasecmp(city, c.name) == 0)
-        {
-            lat = c.latitude;
-            lon = c.longitude;
-            return true;
-        }
-    }
-
-    return false;
+    return findKnownLocationCoordinates(city, lat, lon);
 }
 
 void Configuration::generateConfigApCredentials()
@@ -1041,10 +1165,23 @@ void Configuration::handleSavePost(AsyncWebServerRequest* request)
         return;
     }
 
-    if (locationName.isEmpty() || locationName.length() > (sizeof(m_locationName) - 1))
+    if (locationName.length() > (sizeof(m_locationName) - 1))
     {
         sendValidationError(request, "Invalid location name (1-48 chars).");
         return;
+    }
+
+    float locationLat = 0.0f, locationLon = 0.0f;
+    if (!locationLatText.isEmpty() && !locationLonText.isEmpty())
+    {
+        const float parsedLat = locationLatText.toFloat();
+        const float parsedLon = locationLonText.toFloat();
+        if (parsedLat >= -90.0f && parsedLat <= 90.0f &&
+            parsedLon >= -180.0f && parsedLon <= 180.0f)
+        {
+            locationLat = parsedLat;
+            locationLon = parsedLon;
+        }
     }
 
     const long weatherDataSourceVal = weatherDataSourceText.toInt();
@@ -1075,6 +1212,25 @@ void Configuration::handleSavePost(AsyncWebServerRequest* request)
         return;
     }
 
+    const bool weatherUsesDirectApi = weatherDataSourceVal == static_cast<long>(DataSourceMode::DirectApi);
+    const bool weatherUsesOpenMeteo = weatherApiProviderVal == static_cast<long>(WeatherApiProvider::OpenMeteo);
+    if (weatherUsesDirectApi && weatherUsesOpenMeteo)
+    {
+        if (locationName.isEmpty())
+        {
+            sendValidationError(*m_webServer, "Location is required when weather source is Direct API.");
+            return;
+        }
+
+        if (locationLat == 0.0f && locationLon == 0.0f &&
+            !findKnownLocationCoordinates(locationName.c_str(), locationLat, locationLon))
+        {
+            sendValidationError(*m_webServer,
+                                "Unknown location. Select a suggestion from the list or use one of the built-in cities.");
+            return;
+        }
+    }
+
     Serial.printf("[CONFIG] Save request parsed: weatherSource=%ld departuresSource=%ld weatherApi=%ld departuresApi=%ld location='%s'\n",
                   weatherDataSourceVal,
                   departuresDataSourceVal,
@@ -1094,6 +1250,7 @@ void Configuration::handleSavePost(AsyncWebServerRequest* request)
     setWeatherApiProvider(static_cast<WeatherApiProvider>(weatherApiProviderVal));
     setDeparturesApiProvider(static_cast<DeparturesApiProvider>(departuresApiProviderVal));
     setLocationName(locationName.c_str());
+    setLocationCoordinates(locationLat, locationLon);
     setBkkApiKey(bkkApiKey.c_str());
     setBusStopId(busStopId.c_str());
     setTrainStopId(trainStopId.c_str());
