@@ -2,7 +2,8 @@
 
 #include <Arduino.h>
 
-class WebServer;
+class AsyncWebServer;
+class AsyncWebServerRequest;
 class DNSServer;
 
 /**
@@ -155,7 +156,7 @@ private:
     bool      m_configModeActive          = false;
     char      m_apSsid[32]                = {};
     char      m_apPassword[32]            = {};
-    WebServer* m_webServer                = nullptr;
+    AsyncWebServer* m_webServer           = nullptr;
     DNSServer* m_dnsServer                = nullptr;
     bool      m_webRoutesRegistered       = false;
     bool      m_rebootPending             = false;
@@ -166,14 +167,13 @@ private:
     void scheduleReboot(uint32_t delayMs);
     void renderConfigScreen();
     void setupWebServerRoutes();
-    void handleRootGet();
-    void handleCaptiveProbeGet();
-    void handleSavePost();
-    void handleRebootPost();
-    void handleRebootNowGet();
-    void handleApiSettingsGet();
-    void handleApiGeocodeGet();
-    void handleNotFound();
+    void handleRootGet(AsyncWebServerRequest* request);
+    void handleCaptiveProbeGet(AsyncWebServerRequest* request);
+    void handleSavePost(AsyncWebServerRequest* request);
+    void handleRebootPost(AsyncWebServerRequest* request);
+    void handleRebootNowGet(AsyncWebServerRequest* request);
+    void handleApiSettingsGet(AsyncWebServerRequest* request);
+    void handleNotFound(AsyncWebServerRequest* request);
 };
 
 /** Global configuration instance, defined in configuration.cpp. */
