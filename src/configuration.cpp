@@ -1051,6 +1051,9 @@ void Configuration::setupWebServerRoutes()
     m_webServer->on("/api/geocode", HTTP_GET, [this](AsyncWebServerRequest* request) {
         handleApiGeocodeGet(request);
     });
+    m_webServer->on("/api/wifi-scan", HTTP_GET, [this](AsyncWebServerRequest* request) {
+        handleApiWifiScanGet(request);
+    });
     m_webServer->on("/api/wifi-test", HTTP_POST, [this](AsyncWebServerRequest* request) {
         handleApiWifiTestPost(request);
     });
@@ -1365,6 +1368,40 @@ void Configuration::handleApiSettingsGet(AsyncWebServerRequest* request)
 }
 
 void Configuration::handleApiGeocodeGet(AsyncWebServerRequest* request)
+void Configuration::handleApiWifiScanGet(AsyncWebServerRequest* request)
+{
+    if (request == nullptr)
+    {
+        return;
+    }
+
+    logWebRequest(request, "handleApiWifiScanGet");
+
+    int n = WiFi.scanNetworks(false, false);
+
+    String json = "{\"networks\":[";
+    bool first = true;
+    for (int i = 0; i < n; i++)
+    {
+        if (!first) json += ',';
+        first = false;
+        json += "{\"ssid\":\"";
+        json += WiFi.SSID(i);
+        json += "\",\"rssi\":";
+        json += WiFi.RSSI(i);
+        json += ",\"open\":";
+        json += (WiFi.encryptionType(i) == WIFI_AUTH_OPEN) ? "true" : "false";
+        json += "}";
+    }
+    json += "]}";
+
+    WiFi.scanDelete();
+
+    AsyncWebServerResponse* response = request->beginResponse(200, "application/json", json);
+    response->addHeader("Access-Control-Allow-Origin", "*");
+    request->send(response);
+}
+
 {
     if (request == nullptr)
     {

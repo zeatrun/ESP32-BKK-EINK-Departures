@@ -1,4 +1,20 @@
 import { WiFiTestResult, GeoLocation, ConfigData } from '../types';
+export interface WiFiNetwork {
+  ssid: string;
+  rssi: number;
+  open: boolean;
+}
+
+export async function scanWiFiNetworks(): Promise<WiFiNetwork[]> {
+  try {
+    const response = await fetch(`${API_BASE}/wifi-scan`);
+    const data = await response.json();
+    return data.networks ?? [];
+  } catch (error) {
+    return [];
+  }
+}
+
 
 const API_BASE = '/api';
 
