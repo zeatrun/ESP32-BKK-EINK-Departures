@@ -14,8 +14,6 @@ export default function WeatherPage({ config, setConfig, t, onNext, onPrev }: Pa
 
   return (
     <div className="page active">
-      <h2 style={{ marginBottom: '24px', color: '#333' }}>{t.weatherSettings}</h2>
-
       <div className="form-group">
         <label>{t.weatherSource}</label>
         <select
@@ -69,8 +67,8 @@ export default function WeatherPage({ config, setConfig, t, onNext, onPrev }: Pa
       <div style={{ flex: 1 }} />
 
       <div className="button-group">
-        <button className="btn-secondary" onClick={onPrev}>← {t.wifiTest}</button>
-        <button className="btn-primary" onClick={onNext}>{t.departures} →</button>
+        <button className="btn-secondary" onClick={onPrev}>← {t.back}</button>
+        <button className="btn-primary" onClick={onNext}>{t.next} →</button>
       </div>
     </div>
   );

@@ -52,6 +52,17 @@ const initialConfig: ConfigData = {
   train_stop_id: '',
 };
 
+const pageHeaders: Record<string, { hu: string; en: string }> = {
+  language:   { hu: 'Nyelvválasztó',        en: 'Language' },
+  general:    { hu: 'Általános',             en: 'General' },
+  wifi:       { hu: 'WiFi beállítás',        en: 'WiFi Settings' },
+  'wifi-test':{ hu: 'Csatlakozás...',        en: 'Connecting...' },
+  weather:    { hu: 'Időjárás',              en: 'Weather' },
+  departures: { hu: 'Menetrend',             en: 'Departures' },
+  layout:     { hu: 'Elrendezés',            en: 'Layout' },
+  summary:    { hu: 'Összegzés',             en: 'Summary' },
+};
+
 function App() {
   const [currentPage, setCurrentPage] = useState(0);
   const [config, setConfig] = useState<ConfigData>(initialConfig);
@@ -84,7 +95,7 @@ function App() {
   return (
     <div className="config-container">
       <div className="config-header">
-        {currentPage === 0 ? t.selectLanguage : pages[currentPage].key}
+        {pageHeaders[pages[currentPage].key]?.[language] ?? pages[currentPage].key}
       </div>
       
       <div className="config-content">

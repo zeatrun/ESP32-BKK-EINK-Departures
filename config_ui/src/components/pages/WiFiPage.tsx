@@ -14,8 +14,6 @@ export default function WiFiPage({ config, setConfig, t, onNext, onPrev }: PageP
 
   return (
     <div className="page active">
-      <h2 style={{ marginBottom: '24px', color: '#333' }}>{t.wifiSettings}</h2>
-
       <div className="form-group">
         <label>{t.ssid}</label>
         <input
@@ -44,9 +42,9 @@ export default function WiFiPage({ config, setConfig, t, onNext, onPrev }: PageP
       <div style={{ flex: 1 }} />
 
       <div className="button-group">
-        <button className="btn-secondary" onClick={onPrev}>← {t.general}</button>
+        <button className="btn-secondary" onClick={onPrev}>← {t.back}</button>
         <button className="btn-primary" onClick={onNext} disabled={!canProceed}>
-          {t.wifiTest} →
+          {t.next} →
         </button>
       </div>
     </div>

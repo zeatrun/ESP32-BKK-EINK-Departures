@@ -14,8 +14,6 @@ export default function DeparturesPage({ config, setConfig, t, onNext, onPrev }:
 
   return (
     <div className="page active">
-      <h2 style={{ marginBottom: '24px', color: '#333' }}>{t.departuresSettings}</h2>
-
       <div className="form-group">
         <label>{t.departuresSource}</label>
         <select
@@ -87,8 +85,8 @@ export default function DeparturesPage({ config, setConfig, t, onNext, onPrev }:
       <div style={{ flex: 1 }} />
 
       <div className="button-group">
-        <button className="btn-secondary" onClick={onPrev}>← {t.weather}</button>
-        <button className="btn-primary" onClick={onNext}>{t.layout} →</button>
+        <button className="btn-secondary" onClick={onPrev}>← {t.back}</button>
+        <button className="btn-primary" onClick={onNext}>{t.next} →</button>
       </div>
     </div>
   );

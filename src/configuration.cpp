@@ -1364,6 +1364,51 @@ void Configuration::handleApiSettingsGet(AsyncWebServerRequest* request)
     request->send(200, "application/json", json);
 }
 
+void Configuration::handleApiGeocodeGet(AsyncWebServerRequest* request)
+{
+    if (request == nullptr)
+    {
+        return;
+    }
+
+    logWebRequest(request, "handleApiGeocodeGet");
+
+    const String query = hasRequestArg(request, "q") ? trimCopy(requestArg(request, "q")) : String();
+
+    // If WiFi is connected, proxy to Open-Meteo geocoding API
+    if (WiFi.status() == WL_CONNECTED && !query.isEmpty())
+    {
+        WiFiClientSecure client;
+        client.setInsecure();
+        HTTPClient http;
+
+        String url = String("https://geocoding-api.open-meteo.com/v1/search?name=")
+                     + urlEncode(query)
+                     + "&count=10&language=en&format=json";
+
+        if (http.begin(client, url))
+        {
+            int httpCode = http.GET();
+            if (httpCode == HTTP_CODE_OK)
+            {
+                String payload = http.getString();
+                http.end();
+                AsyncWebServerResponse* response = request->beginResponse(200, "application/json", payload);
+                response->addHeader("Access-Control-Allow-Origin", "*");
+                request->send(response);
+                return;
+            }
+            http.end();
+        }
+    }
+
+    // Offline fallback: return matching entries from KNOWN_LOCATIONS
+    String json = buildKnownLocationsGeocodeJson(query);
+    AsyncWebServerResponse* response = request->beginResponse(200, "application/json", json);
+    response->addHeader("Access-Control-Allow-Origin", "*");
+    request->send(response);
+}
+
 void Configuration::handleApiWifiTestPost(AsyncWebServerRequest* request)
 {
     if (request == nullptr)
@@ -1380,7 +1425,7 @@ void Configuration::handleApiWifiTestPost(AsyncWebServerRequest* request)
     if (request->hasArg("plain"))
     {
         String body = request->arg("plain");
-        DynamicJsonDocument doc(256);
+        JsonDocument doc;
         if (deserializeJson(doc, body) == DeserializationError::Ok)
         {
             ssid = doc["ssid"].as<String>();
@@ -1451,11 +1496,21 @@ void Configuration::handleNotFound(AsyncWebServerRequest* request)
 
     // Try to serve static files from React app
     String path = request->url();
+    String filePath = "/config-app" + path;
     
     // Try with exact path first
-    if (LittleFS.exists("/config-app" + path))
+    if (LittleFS.exists(filePath))
     {
-        AsyncWebServerResponse* response = request->beginResponse(LittleFS, "/config-app" + path);
+        // Determine content type by file extension
+        const char* contentType = "text/plain";
+        if (filePath.endsWith(".html")) contentType = "text/html";
+        else if (filePath.endsWith(".js")) contentType = "application/javascript";
+        else if (filePath.endsWith(".css")) contentType = "text/css";
+        else if (filePath.endsWith(".json")) contentType = "application/json";
+        else if (filePath.endsWith(".woff2")) contentType = "font/woff2";
+        else if (filePath.endsWith(".svg")) contentType = "image/svg+xml";
+        
+        AsyncWebServerResponse* response = request->beginResponse(LittleFS, filePath, contentType);
         request->send(response);
         return;
     }

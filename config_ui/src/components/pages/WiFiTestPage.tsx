@@ -64,12 +64,12 @@ export default function WiFiTestPage({ config, t, onNext, onPrev }: PageProps) {
 
       <div className="button-group" style={{ marginTop: '40px' }}>
         <button className="btn-secondary" onClick={onPrev}>
-          ← {t.retry}
+          ← {t.back}
         </button>
 
         {status === 'success' && (
           <button className="btn-primary" onClick={onNext}>
-            {t.weather} →
+            {t.next} →
           </button>
         )}
 

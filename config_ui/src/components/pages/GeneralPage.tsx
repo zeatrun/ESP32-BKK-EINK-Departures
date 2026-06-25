@@ -12,8 +12,6 @@ interface PageProps {
 export default function GeneralPage({ config, setConfig, t, onNext, onPrev }: PageProps) {
   return (
     <div className="page active">
-      <h2 style={{ marginBottom: '24px', color: '#333' }}>{t.general}</h2>
-      
       <div className="form-group">
         <label>{t.timezone}</label>
         <select
@@ -31,8 +29,8 @@ export default function GeneralPage({ config, setConfig, t, onNext, onPrev }: Pa
       <div style={{ flex: 1 }} />
 
       <div className="button-group">
-        <button className="btn-secondary" onClick={onPrev}>← {t.language}</button>
-        <button className="btn-primary" onClick={onNext}>{t.wifi} →</button>
+        <button className="btn-secondary" onClick={onPrev}>← {t.back}</button>
+        <button className="btn-primary" onClick={onNext}>{t.next} →</button>
       </div>
     </div>
   );

@@ -79,8 +79,6 @@ export default function SummaryPage({ config, t, onPrev }: PageProps) {
 
   return (
     <div className="page active">
-      <h2 style={{ marginBottom: '24px', color: '#333' }}>{t.summary}</h2>
-
       <div className="summary-list">
         <div className="summary-item">
           <span className="summary-item-label">Language:</span>
@@ -119,7 +117,7 @@ export default function SummaryPage({ config, t, onPrev }: PageProps) {
 
       <div className="button-group">
         <button className="btn-secondary" onClick={onPrev} disabled={saving}>
-          ← {t.layout}
+          ← {t.back}
         </button>
         <button
           className="btn-primary"

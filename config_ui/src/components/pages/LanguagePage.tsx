@@ -18,10 +18,6 @@ export default function LanguagePage({ setConfig, t, onNext }: PageProps) {
 
   return (
     <div className="page active">
-      <h2 style={{ marginBottom: '40px', textAlign: 'center', color: '#333' }}>
-        {t.selectLanguage}
-      </h2>
-      
       <div className="language-grid">
         <div
           className="language-box"
