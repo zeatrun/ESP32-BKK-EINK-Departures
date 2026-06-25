@@ -733,9 +733,10 @@ bool Configuration::beginConfigMode()
     WiFi.disconnect(true, true);
     delay(50);
 
-    if (!WiFi.mode(WIFI_AP))
+    // Use AP+STA mode so we can test WiFi connections while config portal is running
+    if (!WiFi.mode(WIFI_AP_STA))
     {
-        Serial.println("[CONFIG] Failed to switch WiFi to AP mode.");
+        Serial.println("[CONFIG] Failed to switch WiFi to AP_STA mode.");
         return false;
     }
 
@@ -1047,6 +1048,15 @@ void Configuration::setupWebServerRoutes()
     m_webServer->on("/api/settings", HTTP_GET, [this](AsyncWebServerRequest* request) {
         handleApiSettingsGet(request);
     });
+    m_webServer->on("/api/geocode", HTTP_GET, [this](AsyncWebServerRequest* request) {
+        handleApiGeocodeGet(request);
+    });
+    m_webServer->on("/api/wifi-test", HTTP_POST, [this](AsyncWebServerRequest* request) {
+        handleApiWifiTestPost(request);
+    });
+    m_webServer->on("/api/config/reset", HTTP_POST, [this](AsyncWebServerRequest* request) {
+        handleApiConfigResetPost(request);
+    });
 
     m_webServer->onNotFound([this](AsyncWebServerRequest* request) {
         handleNotFound(request);
@@ -1062,6 +1072,18 @@ void Configuration::handleRootGet(AsyncWebServerRequest* request)
 
     logWebRequest(request, "handleRootGet");
 
+    // Try to serve React app first
+    if (LittleFS.exists("/config-app/index.html"))
+    {
+        AsyncWebServerResponse* response = request->beginResponse(LittleFS, "/config-app/index.html", "text/html");
+        response->addHeader("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
+        response->addHeader("Pragma", "no-cache");
+        response->addHeader("Expires", "0");
+        request->send(response);
+        return;
+    }
+
+    // Fallback to old HTML config page
     AsyncWebServerResponse* response = request->beginResponse(200, "text/html", buildConfigPage(*this));
     response->addHeader("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
     response->addHeader("Pragma", "no-cache");
@@ -1342,6 +1364,82 @@ void Configuration::handleApiSettingsGet(AsyncWebServerRequest* request)
     request->send(200, "application/json", json);
 }
 
+void Configuration::handleApiWifiTestPost(AsyncWebServerRequest* request)
+{
+    if (request == nullptr)
+    {
+        return;
+    }
+
+    logWebRequest(request, "handleApiWifiTestPost");
+
+    // Parse JSON body
+    String ssid = "";
+    String password = "";
+    
+    if (request->hasArg("plain"))
+    {
+        String body = request->arg("plain");
+        DynamicJsonDocument doc(256);
+        if (deserializeJson(doc, body) == DeserializationError::Ok)
+        {
+            ssid = doc["ssid"].as<String>();
+            password = doc["password"].as<String>();
+        }
+    }
+
+    if (ssid.isEmpty() || password.isEmpty())
+    {
+        request->send(400, "application/json", "{\"success\":false,\"message\":\"Missing ssid or password\"}");
+        return;
+    }
+
+    // Test WiFi connection in STA mode
+    WiFi.mode(WIFI_AP_STA);
+    WiFi.begin(ssid.c_str(), password.c_str());
+
+    bool connected = false;
+    for (int i = 0; i < 20; i++)
+    {
+        if (WiFi.status() == WL_CONNECTED)
+        {
+            connected = true;
+            break;
+        }
+        delay(250);
+    }
+
+    WiFi.disconnect(false); // Keep AP running
+    WiFi.mode(WIFI_AP); // Go back to AP only
+
+    String response = connected
+        ? String("{\"success\":true,\"ssid\":\"") + ssid + "\",\"message\":\"Connected\"}"
+        : String("{\"success\":false,\"ssid\":\"") + ssid + "\",\"message\":\"Connection failed\"}";
+
+    request->send(200, "application/json", response);
+}
+
+void Configuration::handleApiConfigResetPost(AsyncWebServerRequest* request)
+{
+    if (request == nullptr)
+    {
+        return;
+    }
+
+    logWebRequest(request, "handleApiConfigResetPost");
+
+    // Clear all stored preferences
+    Preferences prefs;
+    prefs.begin(CONFIG_PREF_NS, false);
+    prefs.clear();
+    prefs.end();
+
+    loadDefaults();
+
+    request->send(200, "application/json", "{\"success\":true,\"message\":\"Factory reset complete\"}");
+    scheduleReboot(2000);
+}
+
 void Configuration::handleNotFound(AsyncWebServerRequest* request)
 {
     if (request == nullptr)
@@ -1350,5 +1448,18 @@ void Configuration::handleNotFound(AsyncWebServerRequest* request)
     }
 
     logWebRequest(request, "handleNotFound");
+
+    // Try to serve static files from React app
+    String path = request->url();
+    
+    // Try with exact path first
+    if (LittleFS.exists("/config-app" + path))
+    {
+        AsyncWebServerResponse* response = request->beginResponse(LittleFS, "/config-app" + path);
+        request->send(response);
+        return;
+    }
+
+    // Fallback to captive portal redirect
     sendPortalRedirect(request);
 }

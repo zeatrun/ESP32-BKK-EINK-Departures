@@ -173,6 +173,9 @@ private:
     void handleRebootPost(AsyncWebServerRequest* request);
     void handleRebootNowGet(AsyncWebServerRequest* request);
     void handleApiSettingsGet(AsyncWebServerRequest* request);
+    void handleApiGeocodeGet(AsyncWebServerRequest* request);
+    void handleApiWifiTestPost(AsyncWebServerRequest* request);
+    void handleApiConfigResetPost(AsyncWebServerRequest* request);
     void handleNotFound(AsyncWebServerRequest* request);
 };
 
