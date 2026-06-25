@@ -43,6 +43,7 @@
     .suggestion-item:active { background: #ecfeff; }
     .suggestion-main { font-size: .92rem; color: #111827; }
     .suggestion-sub { font-size: .8rem; color: #64748b; margin-top: 2px; }
+    .hidden { display: none !important; }
   </style>
 </head>
 <body>
@@ -89,21 +90,23 @@
         <option value='1' {{WEATHER_DATA_SOURCE_API}}>Direct API</option>
       </select>
 
-      <label for='weather_api_provider'>Weather API Provider</label>
-      <select id='weather_api_provider' name='weather_api_provider' required>
-        <option value='0' {{WEATHER_API_OPENMETEO}}>Open-Meteo</option>
-        <option value='1' {{WEATHER_API_OWM}}>OpenWeatherMap</option>
-      </select>
+      <div id='weather_direct_fields'>
+        <label for='weather_api_provider'>Weather API Provider</label>
+        <select id='weather_api_provider' name='weather_api_provider' required>
+          <option value='0' {{WEATHER_API_OPENMETEO}}>Open-Meteo</option>
+          <option value='1' {{WEATHER_API_OWM}}>OpenWeatherMap</option>
+        </select>
 
-      <label for='loc_search'>Location (City)</label>
-      <div class='suggest-wrap'>
-        <input id='loc_search' value='{{LOCATION_NAME}}' maxlength='80' autocomplete='off' placeholder='Type to search or enter manually...'>
-        <div id='location_suggestions' class='suggestions' aria-label='Location suggestions'></div>
+        <label for='loc_search'>Location (City)</label>
+        <div class='suggest-wrap'>
+          <input id='loc_search' value='{{LOCATION_NAME}}' maxlength='80' autocomplete='off' placeholder='Type to search or enter manually...'>
+          <div id='location_suggestions' class='suggestions' aria-label='Location suggestions'></div>
+        </div>
+        <div class='hint'>Select from autocomplete list (Country/City) or type manually (e.g. Budapest)</div>
       </div>
       <input type='hidden' id='location_name' name='location_name' value='{{LOCATION_NAME}}'>
       <input type='hidden' id='location_lat' name='location_lat' value='{{LOCATION_LAT}}'>
       <input type='hidden' id='location_lon' name='location_lon' value='{{LOCATION_LON}}'>
-      <div class='hint'>Select from autocomplete list (Country/City) or type manually (e.g. Budapest)</div>
 
       <hr style='margin: 20px 0; border: none; border-top: 1px solid #cbd5e1;'>
       <h3 style='font-size: 1rem; margin: 10px 0;'>Departures Settings</h3>
@@ -150,11 +153,21 @@
   <script>
   (function(){
     var s=document.getElementById('loc_search'),
+        weatherSource=document.getElementById('weather_data_source'),
+        weatherDirectFields=document.getElementById('weather_direct_fields'),
         nm=document.getElementById('location_name'),
         la=document.getElementById('location_lat'),
         lo=document.getElementById('location_lon'),
         sg=document.getElementById('location_suggestions'),
         ca={},t;
+
+    function updateWeatherFieldVisibility(){
+      var showDirectFields=weatherSource.value==='1';
+      weatherDirectFields.classList.toggle('hidden',!showDirectFields);
+      if(!showDirectFields){
+        hideSuggestions();
+      }
+    }
 
     var presets=[
       {name:'Budapest',admin1:'Pest',country:'Hungary',latitude:47.4979,longitude:19.0402},
@@ -217,6 +230,8 @@
     }
 
     nm.value=s.value;
+    updateWeatherFieldVisibility();
+    weatherSource.addEventListener('change',updateWeatherFieldVisibility);
     s.addEventListener('input',function(){
       clearTimeout(t);la.value='';lo.value='';nm.value=s.value;
       var q=s.value.trim();
@@ -224,7 +239,7 @@
       if(q.length<2){hideSuggestions();return;}
       renderPresetSuggestions(q);
       t=setTimeout(function(){
-        fetch('https://geocoding-api.open-meteo.com/v1/search?name='+encodeURIComponent(q)+'&count=10&language=en')
+        fetch('/api/geocode?q='+encodeURIComponent(q))
           .then(function(r){return r.json();})
           .then(function(d){
             renderSuggestions(d.results||[]);

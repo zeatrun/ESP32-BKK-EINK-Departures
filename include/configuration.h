@@ -172,6 +172,7 @@ private:
     void handleRebootPost();
     void handleRebootNowGet();
     void handleApiSettingsGet();
+    void handleApiGeocodeGet();
     void handleNotFound();
 };
 
