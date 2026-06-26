@@ -26,7 +26,6 @@ namespace
 {
 constexpr uint16_t CAPTIVE_DNS_PORT = 53;
 constexpr char CONFIG_PREF_NS[] = "cfg";
-constexpr char CONFIG_PAGE_FS_PATH[] = "/config_page.html";
 constexpr bool DUMMY_DEFAULT_USE_MQTT = true;
 
 Configuration::DataSourceMode dataSourceModeFromStoredBool(bool useMqtt)
@@ -323,103 +322,6 @@ bool ensureLittleFsMounted()
     }
 
     return mounted;
-}
-
-String loadConfigPageTemplateFromFs()
-{
-    if (!ensureLittleFsMounted())
-    {
-        return String();
-    }
-
-    File file = LittleFS.open(CONFIG_PAGE_FS_PATH, "r");
-    if (!file)
-    {
-        Serial.printf("[CONFIG] Missing HTML template in LittleFS: %s\n", CONFIG_PAGE_FS_PATH);
-        return String();
-    }
-
-    String html = file.readString();
-    file.close();
-    return html;
-}
-
-String buildConfigPage(const Configuration& cfg)
-{
-    String timezoneOptions;
-    timezoneOptions.reserve(1200);
-    for (const auto& option : TIMEZONE_OPTIONS)
-    {
-        timezoneOptions += F("<option value='");
-        timezoneOptions += htmlEscape(option.value);
-        timezoneOptions += F("'");
-        if (strcmp(option.value, cfg.timezone()) == 0)
-        {
-            timezoneOptions += F(" selected");
-        }
-        timezoneOptions += F(">\n");
-        timezoneOptions += htmlEscape(option.labelEn);
-        timezoneOptions += F("</option>");
-    }
-
-    String html = loadConfigPageTemplateFromFs();
-    if (html.isEmpty())
-    {
-        return F("<!doctype html><html><body style='font-family:Verdana,sans-serif;margin:16px'><h2>Configuration page missing</h2><p>Upload filesystem image and ensure /config_page.html is present.</p></body></html>");
-    }
-
-    html.replace("{{AP_SSID}}", htmlEscape(cfg.configApSsid()));
-    html.replace("{{AP_PASSWORD}}", htmlEscape(cfg.configApPassword()));
-    html.replace("{{WIFI_SSID}}", htmlEscape(cfg.wifiSsid()));
-    html.replace("{{WIFI_PASSWORD}}", htmlEscape(cfg.wifiPassword()));
-    html.replace("{{MQTT_SERVER}}", htmlEscape(cfg.mqttServer()));
-    html.replace("{{MQTT_PORT}}", String(static_cast<unsigned int>(cfg.mqttPort())));
-    html.replace("{{MQTT_DEPARTURES_TOPIC}}", htmlEscape(cfg.mqttTopicDepartures()));
-    html.replace("{{MQTT_WEATHER_TOPIC}}", htmlEscape(cfg.mqttTopicWeather()));
-    html.replace("{{TIMEZONE_OPTIONS}}", timezoneOptions);
-    
-    html.replace("{{WEATHER_DATA_SOURCE_MQTT}}", cfg.weatherDataSourceMode() == Configuration::DataSourceMode::Mqtt ? "selected" : "");
-    html.replace("{{WEATHER_DATA_SOURCE_API}}", cfg.weatherDataSourceMode() == Configuration::DataSourceMode::DirectApi ? "selected" : "");
-    html.replace("{{WEATHER_API_OPENMETEO}}", cfg.weatherApiProvider() == Configuration::WeatherApiProvider::OpenMeteo ? "selected" : "");
-    html.replace("{{WEATHER_API_OWM}}", cfg.weatherApiProvider() == Configuration::WeatherApiProvider::OpenWeatherMap ? "selected" : "");
-    html.replace("{{DEPARTURES_DATA_SOURCE_MQTT}}", cfg.departuresDataSourceMode() == Configuration::DataSourceMode::Mqtt ? "selected" : "");
-    html.replace("{{DEPARTURES_DATA_SOURCE_API}}", cfg.departuresDataSourceMode() == Configuration::DataSourceMode::DirectApi ? "selected" : "");
-    html.replace("{{DEPARTURES_API_BKK}}", cfg.departuresApiProvider() == Configuration::DeparturesApiProvider::Bkk ? "selected" : "");
-    html.replace("{{DEPARTURES_API_MOCK}}", cfg.departuresApiProvider() == Configuration::DeparturesApiProvider::MockData ? "selected" : "");
-    
-    html.replace("{{LOCATION_NAME}}", htmlEscape(cfg.locationName()));
-    {
-        char latBuf[16], lonBuf[16];
-        snprintf(latBuf, sizeof(latBuf), "%.6f", cfg.locationLat());
-        snprintf(lonBuf, sizeof(lonBuf), "%.6f", cfg.locationLon());
-        html.replace("{{LOCATION_LAT}}", latBuf);
-        html.replace("{{LOCATION_LON}}", lonBuf);
-    }
-    html.replace("{{BKK_API_KEY}}", htmlEscape(cfg.bkkApiKey()));
-    html.replace("{{BUS_STOP_ID}}", htmlEscape(cfg.busStopId()));
-    html.replace("{{TRAIN_STOP_ID}}", htmlEscape(cfg.trainStopId()));
-
-    // Backward compatibility: if an older filesystem template is still served,
-    // inject a visible OTA link block before </body>.
-    if (html.indexOf("href='/update'") < 0)
-    {
-        const char* otaBlock =
-            "<div style='margin-top:14px'>"
-            "<a href='/update' style='display:inline-block;padding:10px 14px;border-radius:8px;background:#2563eb;color:#fff;font-weight:700;text-decoration:none'>Update firmware</a>"
-            "</div>";
-
-        const int bodyClosePos = html.lastIndexOf("</body>");
-        if (bodyClosePos >= 0)
-        {
-            html = html.substring(0, bodyClosePos) + otaBlock + html.substring(bodyClosePos);
-        }
-        else
-        {
-            html += otaBlock;
-        }
-    }
-    
-    return html;
 }
 
 void sendValidationError(AsyncWebServerRequest* request, const char* message)
@@ -1060,6 +962,12 @@ void Configuration::setupWebServerRoutes()
     m_webServer->on("/api/config/reset", HTTP_POST, [this](AsyncWebServerRequest* request) {
         handleApiConfigResetPost(request);
     });
+    m_webServer->on("/api/weather-test", HTTP_GET, [this](AsyncWebServerRequest* request) {
+        handleApiWeatherTestGet(request);
+    });
+    m_webServer->on("/api/departures-test", HTTP_POST, [this](AsyncWebServerRequest* request) {
+        handleApiDeparturesTestPost(request);
+    });
 
     m_webServer->onNotFound([this](AsyncWebServerRequest* request) {
         handleNotFound(request);
@@ -1075,19 +983,17 @@ void Configuration::handleRootGet(AsyncWebServerRequest* request)
 
     logWebRequest(request, "handleRootGet");
 
-    // Try to serve React app first
-    if (LittleFS.exists("/config-app/index.html"))
+    if (!LittleFS.exists("/config-app/index.html"))
     {
-        AsyncWebServerResponse* response = request->beginResponse(LittleFS, "/config-app/index.html", "text/html");
-        response->addHeader("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
-        response->addHeader("Pragma", "no-cache");
-        response->addHeader("Expires", "0");
-        request->send(response);
+        request->send(503, "text/html",
+            F("<!doctype html><html><body style='font-family:Verdana,sans-serif;margin:16px'>"
+              "<h2>Config UI not found</h2>"
+              "<p>Upload the filesystem image (<code>buildfs</code> + <code>uploadfs</code>) and try again.</p>"
+              "</body></html>"));
         return;
     }
 
-    // Fallback to old HTML config page
-    AsyncWebServerResponse* response = request->beginResponse(200, "text/html", buildConfigPage(*this));
+    AsyncWebServerResponse* response = request->beginResponse(LittleFS, "/config-app/index.html", "text/html");
     response->addHeader("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
     response->addHeader("Pragma", "no-cache");
     response->addHeader("Expires", "0");
@@ -1368,40 +1274,6 @@ void Configuration::handleApiSettingsGet(AsyncWebServerRequest* request)
 }
 
 void Configuration::handleApiGeocodeGet(AsyncWebServerRequest* request)
-void Configuration::handleApiWifiScanGet(AsyncWebServerRequest* request)
-{
-    if (request == nullptr)
-    {
-        return;
-    }
-
-    logWebRequest(request, "handleApiWifiScanGet");
-
-    int n = WiFi.scanNetworks(false, false);
-
-    String json = "{\"networks\":[";
-    bool first = true;
-    for (int i = 0; i < n; i++)
-    {
-        if (!first) json += ',';
-        first = false;
-        json += "{\"ssid\":\"";
-        json += WiFi.SSID(i);
-        json += "\",\"rssi\":";
-        json += WiFi.RSSI(i);
-        json += ",\"open\":";
-        json += (WiFi.encryptionType(i) == WIFI_AUTH_OPEN) ? "true" : "false";
-        json += "}";
-    }
-    json += "]}";
-
-    WiFi.scanDelete();
-
-    AsyncWebServerResponse* response = request->beginResponse(200, "application/json", json);
-    response->addHeader("Access-Control-Allow-Origin", "*");
-    request->send(response);
-}
-
 {
     if (request == nullptr)
     {
@@ -1445,6 +1317,41 @@ void Configuration::handleApiWifiScanGet(AsyncWebServerRequest* request)
     response->addHeader("Access-Control-Allow-Origin", "*");
     request->send(response);
 }
+
+void Configuration::handleApiWifiScanGet(AsyncWebServerRequest* request)
+{
+    if (request == nullptr)
+    {
+        return;
+    }
+
+    logWebRequest(request, "handleApiWifiScanGet");
+
+    int n = WiFi.scanNetworks(false, false);
+
+    String json = "{\"networks\":[";
+    bool first = true;
+    for (int i = 0; i < n; i++)
+    {
+        if (!first) json += ',';
+        first = false;
+        json += "{\"ssid\":\"";
+        json += WiFi.SSID(i);
+        json += "\",\"rssi\":";
+        json += WiFi.RSSI(i);
+        json += ",\"open\":";
+        json += (WiFi.encryptionType(i) == WIFI_AUTH_OPEN) ? "true" : "false";
+        json += "}";
+    }
+    json += "]}";
+
+    WiFi.scanDelete();
+
+    AsyncWebServerResponse* response = request->beginResponse(200, "application/json", json);
+    response->addHeader("Access-Control-Allow-Origin", "*");
+    request->send(response);
+}
+
 
 void Configuration::handleApiWifiTestPost(AsyncWebServerRequest* request)
 {
@@ -1522,6 +1429,144 @@ void Configuration::handleApiConfigResetPost(AsyncWebServerRequest* request)
     scheduleReboot(2000);
 }
 
+void Configuration::handleApiWeatherTestGet(AsyncWebServerRequest* request)
+{
+    if (request == nullptr)
+    {
+        return;
+    }
+
+    logWebRequest(request, "handleApiWeatherTestGet");
+
+    if (!request->hasParam("lat") || !request->hasParam("lon"))
+    {
+        request->send(400, "application/json", "{\"success\":false,\"message\":\"Missing latitude or longitude parameters\"}");
+        return;
+    }
+
+    String lat = request->getParam("lat")->value();
+    String lon = request->getParam("lon")->value();
+
+    // Parse and validate coordinates
+    float latitude = lat.toFloat();
+    float longitude = lon.toFloat();
+
+    if (latitude < -90.0f || latitude > 90.0f || longitude < -180.0f || longitude > 180.0f)
+    {
+        request->send(400, "application/json", "{\"success\":false,\"message\":\"Invalid coordinates\"}");
+        return;
+    }
+
+    // Try real HTTP call to Open-Meteo if WiFi is connected
+    if (WiFi.status() == WL_CONNECTED)
+    {
+        HTTPClient http;
+        String url = String("http://api.open-meteo.com/v1/forecast?latitude=") +
+                     String(latitude, 4) + "&longitude=" + String(longitude, 4) +
+                     "&current_weather=true&forecast_days=1";
+        http.begin(url);
+        int httpCode = http.GET();
+        http.end();
+
+        if (httpCode == 200)
+        {
+            request->send(200, "application/json",
+                "{\"success\":true,\"message\":\"Weather data fetched successfully\"}");
+        }
+        else
+        {
+            String response = String("{\"success\":false,\"message\":\"Open-Meteo returned HTTP ") +
+                              String(httpCode) + "}";
+            request->send(200, "application/json", response);
+        }
+        return;
+    }
+
+    // No WiFi — just validate format
+    request->send(200, "application/json",
+        "{\"success\":true,\"message\":\"Coordinates valid (no WiFi to verify live data)\"}" );
+}
+
+void Configuration::handleApiDeparturesTestPost(AsyncWebServerRequest* request)
+{
+    if (request == nullptr)
+    {
+        return;
+    }
+
+    logWebRequest(request, "handleApiDeparturesTestPost");
+
+    // Parse JSON body (same pattern as handleApiWifiTestPost)
+    JsonDocument doc;
+    if (request->hasArg("plain"))
+    {
+        DeserializationError error = deserializeJson(doc, request->arg("plain"));
+        if (error)
+        {
+            request->send(400, "application/json", "{\"success\":false,\"message\":\"Invalid JSON\"}");
+            return;
+        }
+    }
+    else
+    {
+        request->send(400, "application/json", "{\"success\":false,\"message\":\"Missing JSON body\"}");
+        return;
+    }
+
+    if (!doc["apiKey"].is<String>() || !doc["busStopId"].is<String>() || !doc["trainStopId"].is<String>())
+    {
+        request->send(400, "application/json", "{\"success\":false,\"message\":\"Missing required fields\"}");
+        return;
+    }
+
+    String apiKey = doc["apiKey"].as<String>();
+    String busStopId = doc["busStopId"].as<String>();
+    String trainStopId = doc["trainStopId"].as<String>();
+
+    if (apiKey.length() == 0 || (busStopId.length() == 0 && trainStopId.length() == 0))
+    {
+        request->send(400, "application/json", "{\"success\":false,\"message\":\"Empty API key or stop IDs\"}");
+        return;
+    }
+
+    // Try real BKK API call if WiFi is connected
+    if (WiFi.status() == WL_CONNECTED && busStopId.length() > 0)
+    {
+        HTTPClient http;
+        String url = String("https://futar.bkk.hu/api/query/v1/ws/otp/api/where/arrivals-and-departures-for-stop.json?stopId=") +
+                     busStopId + "&minutesBefore=0&minutesAfter=30&key=" + apiKey;
+        http.begin(url);
+        int httpCode = http.GET();
+        http.end();
+
+        if (httpCode == 200)
+        {
+            request->send(200, "application/json",
+                "{\"success\":true,\"message\":\"BKK API connection successful\"}");
+        }
+        else if (httpCode == 401)
+        {
+            request->send(200, "application/json",
+                "{\"success\":false,\"message\":\"BKK API: invalid API key (401)\"}");
+        }
+        else if (httpCode == 404)
+        {
+            request->send(200, "application/json",
+                "{\"success\":false,\"message\":\"BKK API: stop not found (404)\"}");
+        }
+        else
+        {
+            String errResp = String("{\"success\":false,\"message\":\"BKK API returned HTTP ") +
+                             String(httpCode) + "}";
+            request->send(200, "application/json", errResp);
+        }
+        return;
+    }
+
+    // No WiFi - just validate format
+    request->send(200, "application/json",
+        "{\"success\":true,\"message\":\"Inputs valid (no WiFi to verify live data)\"}");
+}
 void Configuration::handleNotFound(AsyncWebServerRequest* request)
 {
     if (request == nullptr)

@@ -76,6 +76,36 @@ export async function saveConfiguration(config: ConfigData): Promise<{ success: 
   }
 }
 
+export async function testWeather(lat: string, lon: string): Promise<{ success: boolean; message: string }> {
+  try {
+    const response = await fetch(`${API_BASE}/weather-test?lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(lon)}`);
+    const data = await response.json();
+    return data;
+  } catch (error) {
+    return {
+      success: false,
+      message: 'Failed to fetch weather data'
+    };
+  }
+}
+
+export async function testDepartures(apiKey: string, busStopId: string, trainStopId: string): Promise<{ success: boolean; message: string }> {
+  try {
+    const response = await fetch(`${API_BASE}/departures-test`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ apiKey, busStopId, trainStopId })
+    });
+    const data = await response.json();
+    return data;
+  } catch (error) {
+    return {
+      success: false,
+      message: 'Failed to fetch departures data'
+    };
+  }
+}
+
 export async function factoryReset(): Promise<{ success: boolean; message: string }> {
   try {
     const response = await fetch(`${API_BASE}/config/reset`, { method: 'POST' });

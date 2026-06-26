@@ -20,14 +20,14 @@ export default function WiFiTestPage({ config, t, onNext, onPrev }: PageProps) {
         const result = await testWiFi(config.wifi_ssid, config.wifi_password);
         if (result.success) {
           setStatus('success');
-          setMessage(t.testSuccess);
+          setMessage(t.wifiTestSuccess);
         } else {
           setStatus('failed');
-          setMessage(result.message || t.testFailed);
+          setMessage(result.message || t.wifiTestFailed);
         }
       } catch (error) {
         setStatus('failed');
-        setMessage(t.testFailed);
+        setMessage(t.wifiTestFailed);
       }
     };
 
@@ -40,7 +40,7 @@ export default function WiFiTestPage({ config, t, onNext, onPrev }: PageProps) {
         {status === 'testing' && (
           <>
             <div className="spinner" />
-            <div className="status-text">{t.testing}</div>
+            <div className="status-text">{t.wifiTesting}</div>
             <div className="status-subtext">{config.wifi_ssid}</div>
           </>
         )}
@@ -48,7 +48,7 @@ export default function WiFiTestPage({ config, t, onNext, onPrev }: PageProps) {
         {status === 'success' && (
           <>
             <div className="status-icon success">✓</div>
-            <div className="status-text">{t.testSuccess}</div>
+            <div className="status-text">{t.wifiTestSuccess}</div>
             <div className="status-subtext">{config.wifi_ssid}</div>
           </>
         )}
@@ -56,7 +56,7 @@ export default function WiFiTestPage({ config, t, onNext, onPrev }: PageProps) {
         {status === 'failed' && (
           <>
             <div className="status-icon error">✕</div>
-            <div className="status-text">{t.testFailed}</div>
+            <div className="status-text">{t.wifiTestFailed}</div>
             <div className="status-subtext">{message}</div>
           </>
         )}

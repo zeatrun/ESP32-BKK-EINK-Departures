@@ -104,6 +104,7 @@ On battery-band change, display manager receives a notification and refreshes th
 - [src/weather.cpp](src/weather.cpp): global weather storage
 - [include/settings_example.h](include/settings_example.h): configuration template
 - [data/config_page.html](data/config_page.html): config portal HTML template loaded from LittleFS
+- [config_ui/](config_ui/): React configuration wizard source — see [config_ui/README.md](config_ui/README.md)
 - [script/settings_example.py](script/settings_example.py): configuration template for helper publisher scripts
 - [script/bkk_grabber.py](script/bkk_grabber.py): helper publisher for Hungarian public transport departures
 - [script/weather_grabber.py](script/weather_grabber.py): helper publisher for Open-Meteo weather
@@ -295,7 +296,9 @@ Notes:
 
 ## Config Mode (AP + Captive Portal)
 
-The firmware has a dedicated config mode that starts an access point and serves a local configuration page.
+The firmware has a dedicated config mode that starts an access point and serves a React-based configuration wizard from LittleFS.
+
+> See [config_ui/README.md](config_ui/README.md) for the full documentation of the React project: development setup, build process, translation conventions, and integration with PlatformIO.
 
 How to enter config mode:
 - hold the config button on GPIO2 (XIAO ESP32S3 D1/A1) during boot

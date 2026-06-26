@@ -177,6 +177,8 @@ private:
     void handleApiWifiScanGet(AsyncWebServerRequest* request);
     void handleApiWifiTestPost(AsyncWebServerRequest* request);
     void handleApiConfigResetPost(AsyncWebServerRequest* request);
+    void handleApiWeatherTestGet(AsyncWebServerRequest* request);
+    void handleApiDeparturesTestPost(AsyncWebServerRequest* request);
     void handleNotFound(AsyncWebServerRequest* request);
 };
 
