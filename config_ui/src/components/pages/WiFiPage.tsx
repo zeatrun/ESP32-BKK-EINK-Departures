@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { ConfigData } from '../../types';
 import { scanWiFiNetworks, WiFiNetwork } from '../../api/espApi';
 
@@ -21,8 +21,17 @@ export default function WiFiPage({ config, setConfig, t, onNext, onPrev }: PageP
   const [networks, setNetworks] = useState<WiFiNetwork[]>([]);
   const [scanning, setScanning] = useState(true);
   const [showManual, setShowManual] = useState(false);
+  const ssidInputRef = useRef<HTMLInputElement | null>(null);
+  const passwordInputRef = useRef<HTMLInputElement | null>(null);
 
   const canProceed = config.wifi_ssid.length > 0 && config.wifi_password.length >= 8;
+
+  const handleEnterProceed = (event: React.KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === 'Enter' && canProceed) {
+      event.preventDefault();
+      onNext();
+    }
+  };
 
   useEffect(() => {
     const doScan = async () => {
@@ -34,6 +43,16 @@ export default function WiFiPage({ config, setConfig, t, onNext, onPrev }: PageP
     };
     doScan();
   }, []);
+
+  useEffect(() => {
+    if (showManual) {
+      ssidInputRef.current?.focus();
+      return;
+    }
+    if (config.wifi_ssid.length > 0) {
+      passwordInputRef.current?.focus();
+    }
+  }, [showManual, config.wifi_ssid]);
 
   const doRescan = async () => {
     setScanning(true);
@@ -117,10 +136,12 @@ export default function WiFiPage({ config, setConfig, t, onNext, onPrev }: PageP
             )}
           </div>
           <input
+            ref={ssidInputRef}
             type="text"
             placeholder="Network name..."
             value={config.wifi_ssid}
             onChange={(e) => setConfig({ ...config, wifi_ssid: e.target.value })}
+            onKeyDown={handleEnterProceed}
           />
         </div>
       )}
@@ -129,11 +150,12 @@ export default function WiFiPage({ config, setConfig, t, onNext, onPrev }: PageP
         <div className="form-group">
           <label>{t.password}</label>
           <input
+            ref={passwordInputRef}
             type="password"
             placeholder={t.passwordHint ?? 'At least 8 characters...'}
             value={config.wifi_password}
             onChange={(e) => setConfig({ ...config, wifi_password: e.target.value })}
-            autoFocus
+            onKeyDown={handleEnterProceed}
           />
           {config.wifi_password && config.wifi_password.length < 8 && (
             <small style={{ color: '#f44336', display: 'block', marginTop: '4px' }}>

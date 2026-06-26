@@ -63,7 +63,7 @@ export default function WiFiTestPage({ config, t, onNext, onPrev }: PageProps) {
       </div>
 
       <div className="button-group" style={{ marginTop: '40px' }}>
-        <button className="btn-secondary" onClick={onPrev}>
+        <button className={status === 'failed' ? 'btn-primary' : 'btn-secondary'} onClick={onPrev}>
           ← {t.back}
         </button>
 
