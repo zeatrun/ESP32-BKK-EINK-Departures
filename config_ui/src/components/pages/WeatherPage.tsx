@@ -12,7 +12,7 @@ interface PageProps {
 
 export default function WeatherPage({ config, setConfig, t, onNext, onPrev }: PageProps) {
   const weatherSourceIsMqtt = config.weather_data_source === '1';
-  const [searchQuery, setSearchQuery] = useState('');
+  const [searchQuery, setSearchQuery] = useState(config.location_name || '');
   const [searchResults, setSearchResults] = useState<GeoLocation[]>([]);
   const [searching, setSearching] = useState(false);
   const [showManualCoords, setShowManualCoords] = useState(false);
@@ -71,7 +71,7 @@ export default function WeatherPage({ config, setConfig, t, onNext, onPrev }: Pa
       location_lat: location.latitude.toString(),
       location_lon: location.longitude.toString()
     });
-    setSearchQuery('');
+    setSearchQuery(location.name);
     setSearchResults([]);
     setShowManualCoords(false);
     setLatError('');

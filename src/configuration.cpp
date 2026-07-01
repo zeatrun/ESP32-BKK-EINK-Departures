@@ -1641,36 +1641,38 @@ void Configuration::handleApiDeparturesTestPost(AsyncWebServerRequest* request)
 
     logWebRequest(request, "handleApiDeparturesTestPost");
 
-    // Parse JSON body (same pattern as handleApiWifiTestPost)
-    JsonDocument doc;
-    if (request->hasArg("plain"))
+    // Prefer form/query params; fallback to JSON body.
+    String apiKey = trimCopy(requestArg(request, "apiKey"));
+    String busStopId = trimCopy(requestArg(request, "busStopId"));
+    String trainStopId = trimCopy(requestArg(request, "trainStopId"));
+
+    if (apiKey.isEmpty() || (busStopId.isEmpty() && trainStopId.isEmpty()))
     {
-        DeserializationError error = deserializeJson(doc, request->arg("plain"));
-        if (error)
+        if (request->hasArg("plain"))
         {
-            request->send(400, "application/json", "{\"success\":false,\"message\":\"Invalid JSON\"}");
-            return;
+            JsonDocument doc;
+            DeserializationError error = deserializeJson(doc, request->arg("plain"));
+            if (!error)
+            {
+                if (apiKey.isEmpty())
+                {
+                    apiKey = trimCopy(doc["apiKey"].as<String>());
+                }
+                if (busStopId.isEmpty())
+                {
+                    busStopId = trimCopy(doc["busStopId"].as<String>());
+                }
+                if (trainStopId.isEmpty())
+                {
+                    trainStopId = trimCopy(doc["trainStopId"].as<String>());
+                }
+            }
         }
     }
-    else
-    {
-        request->send(400, "application/json", "{\"success\":false,\"message\":\"Missing JSON body\"}");
-        return;
-    }
-
-    if (!doc["apiKey"].is<String>() || !doc["busStopId"].is<String>() || !doc["trainStopId"].is<String>())
-    {
-        request->send(400, "application/json", "{\"success\":false,\"message\":\"Missing required fields\"}");
-        return;
-    }
-
-    String apiKey = doc["apiKey"].as<String>();
-    String busStopId = doc["busStopId"].as<String>();
-    String trainStopId = doc["trainStopId"].as<String>();
 
     if (apiKey.length() == 0 || (busStopId.length() == 0 && trainStopId.length() == 0))
     {
-        request->send(400, "application/json", "{\"success\":false,\"message\":\"Empty API key or stop IDs\"}");
+        request->send(400, "application/json", "{\"success\":false,\"message\":\"Missing API key or stop IDs\"}");
         return;
     }
 

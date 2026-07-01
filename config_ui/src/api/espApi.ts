@@ -107,10 +107,16 @@ export async function testWeather(lat: string, lon: string): Promise<{ success: 
 
 export async function testDepartures(apiKey: string, busStopId: string, trainStopId: string): Promise<{ success: boolean; message: string }> {
   try {
+    const body = new URLSearchParams({
+      apiKey,
+      busStopId,
+      trainStopId,
+    }).toString();
+
     const response = await fetch(`${API_BASE}/departures-test`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ apiKey, busStopId, trainStopId })
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
+      body
     });
     const data = await response.json();
     return data;
