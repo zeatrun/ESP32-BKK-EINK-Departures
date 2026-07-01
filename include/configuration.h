@@ -176,6 +176,7 @@ private:
     void handleApiGeocodeGet(AsyncWebServerRequest* request);
     void handleApiWifiScanGet(AsyncWebServerRequest* request);
     void handleApiWifiTestPost(AsyncWebServerRequest* request);
+    void handleApiConfigSavePost(AsyncWebServerRequest* request);
     void handleApiConfigResetPost(AsyncWebServerRequest* request);
     void handleApiWeatherTestGet(AsyncWebServerRequest* request);
     void handleApiDeparturesTestPost(AsyncWebServerRequest* request);

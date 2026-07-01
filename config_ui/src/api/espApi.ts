@@ -76,10 +76,31 @@ export async function searchLocations(query: string): Promise<GeoLocation[]> {
 
 export async function saveConfiguration(config: ConfigData): Promise<{ success: boolean; message: string }> {
   try {
+    const body = new URLSearchParams({
+      language: config.language,
+      wifi_ssid: config.wifi_ssid,
+      wifi_password: config.wifi_password,
+      mqtt_server: config.mqtt_server,
+      mqtt_port: config.mqtt_port,
+      mqtt_departures_topic: config.mqtt_departures_topic,
+      mqtt_weather_topic: config.mqtt_weather_topic,
+      timezone: config.timezone,
+      weather_data_source: config.weather_data_source,
+      departures_data_source: config.departures_data_source,
+      weather_api_provider: config.weather_api_provider,
+      departures_api_provider: config.departures_api_provider,
+      location_name: config.location_name,
+      location_lat: config.location_lat,
+      location_lon: config.location_lon,
+      bkk_api_key: config.bkk_api_key,
+      bus_stop_id: config.bus_stop_id,
+      train_stop_id: config.train_stop_id,
+    }).toString();
+
     const response = await fetch(`${API_BASE}/config/save`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(config)
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
+      body
     });
     
     const data = await response.json();

@@ -10,3 +10,6 @@ build_log.txt
 EinkESP32_TransportBoard.code-workspace
 script/settings.py
 script/__pycache__/
+
+# Generated React config UI artifacts
+data/config-app/

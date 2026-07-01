@@ -52,6 +52,10 @@ export default function WeatherPage({ config, setConfig, t, onNext, onPrev }: Pa
 
   const handleLocationSearch = async (query: string) => {
     setSearchQuery(query);
+    setConfig({ ...config, location_name: query });
+    setTestedSuccessfully(false);
+    setWeatherTestStatus(null);
+    setWeatherTestMessage('');
     
     if (query.length < 2) {
       setSearchResults([]);

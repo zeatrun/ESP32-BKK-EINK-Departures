@@ -1060,6 +1060,9 @@ void Configuration::setupWebServerRoutes()
     m_webServer->on("/api/wifi-test", HTTP_POST, [this](AsyncWebServerRequest* request) {
         handleApiWifiTestPost(request);
     });
+    m_webServer->on("/api/config/save", HTTP_POST, [this](AsyncWebServerRequest* request) {
+        handleApiConfigSavePost(request);
+    });
     m_webServer->on("/api/config/reset", HTTP_POST, [this](AsyncWebServerRequest* request) {
         handleApiConfigResetPost(request);
     });
@@ -1551,6 +1554,120 @@ void Configuration::handleApiWifiTestPost(AsyncWebServerRequest* request)
         : String("{\"success\":false,\"ssid\":\"") + ssid + "\",\"message\":\"Connection failed\"}";
 
     request->send(200, "application/json", response);
+}
+
+void Configuration::handleApiConfigSavePost(AsyncWebServerRequest* request)
+{
+    if (request == nullptr)
+    {
+        return;
+    }
+
+    logWebRequest(request, "handleApiConfigSavePost");
+
+    JsonDocument doc;
+    bool hasJsonBody = false;
+    if (request->hasArg("plain"))
+    {
+        DeserializationError error = deserializeJson(doc, request->arg("plain"));
+        if (!error)
+        {
+            hasJsonBody = true;
+        }
+    }
+
+    auto getField = [&](const char* key) -> String
+    {
+        String value = trimCopy(requestArg(request, key));
+        if (!value.isEmpty())
+        {
+            return value;
+        }
+        if (hasJsonBody)
+        {
+            return trimCopy(doc[key].as<String>());
+        }
+        return String();
+    };
+
+    const String wifiSsid = getField("wifi_ssid");
+    const String wifiPassword = getField("wifi_password");
+    const String mqttServer = getField("mqtt_server");
+    const String mqttPortText = getField("mqtt_port");
+    const String depTopic = getField("mqtt_departures_topic");
+    const String weatherTopic = getField("mqtt_weather_topic");
+    const String timezone = getField("timezone");
+    const String weatherDataSourceText = getField("weather_data_source");
+    const String departuresDataSourceText = getField("departures_data_source");
+    const String weatherApiProviderText = getField("weather_api_provider");
+    const String departuresApiProviderText = getField("departures_api_provider");
+    const String locationName = getField("location_name");
+    const String locationLatText = getField("location_lat");
+    const String locationLonText = getField("location_lon");
+    const String bkkApiKey = getField("bkk_api_key");
+    const String busStopId = getField("bus_stop_id");
+    const String trainStopId = getField("train_stop_id");
+
+    if (wifiSsid.isEmpty() || wifiPassword.isEmpty())
+    {
+        request->send(400, "application/json", "{\"success\":false,\"message\":\"Missing WiFi credentials\"}");
+        return;
+    }
+
+    const long port = mqttPortText.toInt();
+    if (port <= 0 || port > 65535)
+    {
+        request->send(400, "application/json", "{\"success\":false,\"message\":\"Invalid MQTT port\"}");
+        return;
+    }
+
+    float locationLat = 0.0f;
+    float locationLon = 0.0f;
+    if (!locationLatText.isEmpty() && !locationLonText.isEmpty())
+    {
+        const float parsedLat = locationLatText.toFloat();
+        const float parsedLon = locationLonText.toFloat();
+        if (parsedLat >= -90.0f && parsedLat <= 90.0f &&
+            parsedLon >= -180.0f && parsedLon <= 180.0f)
+        {
+            locationLat = parsedLat;
+            locationLon = parsedLon;
+        }
+    }
+
+    // If no explicit coordinates came from UI, allow fallback by known city names.
+    if (locationLat == 0.0f && locationLon == 0.0f && !locationName.isEmpty())
+    {
+        float knownLat = 0.0f;
+        float knownLon = 0.0f;
+        if (findKnownLocationCoordinates(locationName.c_str(), knownLat, knownLon))
+        {
+            locationLat = knownLat;
+            locationLon = knownLon;
+        }
+    }
+
+    setWifiSsid(wifiSsid.c_str());
+    setWifiPassword(wifiPassword.c_str());
+    setMqttServer(mqttServer.c_str());
+    setMqttPort(static_cast<uint16_t>(port));
+    setMqttTopicDepartures(depTopic.c_str());
+    setMqttTopicWeather(weatherTopic.c_str());
+    setTimezone(timezone.c_str());
+    setWeatherDataSourceMode(static_cast<DataSourceMode>(weatherDataSourceText.toInt()));
+    setDeparturesDataSourceMode(static_cast<DataSourceMode>(departuresDataSourceText.toInt()));
+    setWeatherApiProvider(static_cast<WeatherApiProvider>(weatherApiProviderText.toInt()));
+    setDeparturesApiProvider(static_cast<DeparturesApiProvider>(departuresApiProviderText.toInt()));
+    setLocationName(locationName.c_str());
+    setLocationCoordinates(locationLat, locationLon);
+    setBkkApiKey(bkkApiKey.c_str());
+    setBusStopId(busStopId.c_str());
+    setTrainStopId(trainStopId.c_str());
+
+    save();
+    renderConfigScreen();
+
+    request->send(200, "application/json", "{\"success\":true,\"message\":\"Configuration saved\"}");
 }
 
 void Configuration::handleApiConfigResetPost(AsyncWebServerRequest* request)
