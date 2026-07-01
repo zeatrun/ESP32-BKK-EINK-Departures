@@ -35,6 +35,31 @@ Configuration::DataSourceMode dataSourceModeFromStoredBool(bool useMqtt)
                    : Configuration::DataSourceMode::DirectApi;
 }
 
+bool parseUiDataSourceMode(const String& value, Configuration::DataSourceMode& outMode)
+{
+    String v = value;
+    v.trim();
+
+    if (v.equalsIgnoreCase("0") || v.equalsIgnoreCase("direct_api") || v.equalsIgnoreCase("api"))
+    {
+        outMode = Configuration::DataSourceMode::DirectApi;
+        return true;
+    }
+
+    if (v.equalsIgnoreCase("1") || v.equalsIgnoreCase("mqtt"))
+    {
+        outMode = Configuration::DataSourceMode::Mqtt;
+        return true;
+    }
+
+    return false;
+}
+
+uint8_t dataSourceModeToUiValue(Configuration::DataSourceMode mode)
+{
+    return (mode == Configuration::DataSourceMode::DirectApi) ? 0U : 1U;
+}
+
 const char* dataSourceModeToString(Configuration::DataSourceMode mode)
 {
     return (mode == Configuration::DataSourceMode::Mqtt) ? "mqtt" : "direct_api";
@@ -1222,15 +1247,15 @@ void Configuration::handleSavePost(AsyncWebServerRequest* request)
         }
     }
 
-    const long weatherDataSourceVal = weatherDataSourceText.toInt();
-    if (weatherDataSourceVal < 0 || weatherDataSourceVal > 1)
+    DataSourceMode weatherSourceMode = DataSourceMode::Mqtt;
+    if (!parseUiDataSourceMode(weatherDataSourceText, weatherSourceMode))
     {
         sendValidationError(request, "Invalid weather data source.");
         return;
     }
 
-    const long departuresDataSourceVal = departuresDataSourceText.toInt();
-    if (departuresDataSourceVal < 0 || departuresDataSourceVal > 1)
+    DataSourceMode departuresSourceMode = DataSourceMode::Mqtt;
+    if (!parseUiDataSourceMode(departuresDataSourceText, departuresSourceMode))
     {
         sendValidationError(request, "Invalid departures data source.");
         return;
@@ -1250,7 +1275,7 @@ void Configuration::handleSavePost(AsyncWebServerRequest* request)
         return;
     }
 
-    const bool weatherUsesDirectApi = weatherDataSourceVal == static_cast<long>(DataSourceMode::DirectApi);
+    const bool weatherUsesDirectApi = weatherSourceMode == DataSourceMode::DirectApi;
     const bool weatherUsesOpenMeteo = weatherApiProviderVal == static_cast<long>(WeatherApiProvider::OpenMeteo);
     if (weatherUsesDirectApi && weatherUsesOpenMeteo)
     {
@@ -1269,9 +1294,9 @@ void Configuration::handleSavePost(AsyncWebServerRequest* request)
         }
     }
 
-    Serial.printf("[CONFIG] Save request parsed: weatherSource=%ld departuresSource=%ld weatherApi=%ld departuresApi=%ld location='%s'\n",
-                  weatherDataSourceVal,
-                  departuresDataSourceVal,
+    Serial.printf("[CONFIG] Save request parsed: weatherSource=%u departuresSource=%u weatherApi=%ld departuresApi=%ld location='%s'\n",
+                  static_cast<unsigned int>(weatherSourceMode),
+                  static_cast<unsigned int>(departuresSourceMode),
                   weatherApiProviderVal,
                   departuresApiProviderVal,
                   locationName.c_str());
@@ -1283,8 +1308,8 @@ void Configuration::handleSavePost(AsyncWebServerRequest* request)
     setMqttTopicDepartures(depTopic.c_str());
     setMqttTopicWeather(weatherTopic.c_str());
     setTimezone(timezone.c_str());
-    setWeatherDataSourceMode(static_cast<DataSourceMode>(weatherDataSourceVal));
-    setDeparturesDataSourceMode(static_cast<DataSourceMode>(departuresDataSourceVal));
+    setWeatherDataSourceMode(weatherSourceMode);
+    setDeparturesDataSourceMode(departuresSourceMode);
     setWeatherApiProvider(static_cast<WeatherApiProvider>(weatherApiProviderVal));
     setDeparturesApiProvider(static_cast<DeparturesApiProvider>(departuresApiProviderVal));
     setLocationName(locationName.c_str());
@@ -1367,10 +1392,10 @@ void Configuration::handleApiSettingsGet(AsyncWebServerRequest* request)
     json += timezone();
     json += "\",";
     json += "\"weatherDataSource\":";
-    json += String(static_cast<unsigned int>(weatherDataSourceMode()));
+    json += String(static_cast<unsigned int>(dataSourceModeToUiValue(weatherDataSourceMode())));
     json += ",";
     json += "\"departuresDataSource\":";
-    json += String(static_cast<unsigned int>(departuresDataSourceMode()));
+    json += String(static_cast<unsigned int>(dataSourceModeToUiValue(departuresDataSourceMode())));
     json += ",";
     json += "\"location\":\"";
     json += locationName();
@@ -1654,8 +1679,23 @@ void Configuration::handleApiConfigSavePost(AsyncWebServerRequest* request)
     setMqttTopicDepartures(depTopic.c_str());
     setMqttTopicWeather(weatherTopic.c_str());
     setTimezone(timezone.c_str());
-    setWeatherDataSourceMode(static_cast<DataSourceMode>(weatherDataSourceText.toInt()));
-    setDeparturesDataSourceMode(static_cast<DataSourceMode>(departuresDataSourceText.toInt()));
+
+    DataSourceMode weatherSourceMode = DataSourceMode::Mqtt;
+    if (!parseUiDataSourceMode(weatherDataSourceText, weatherSourceMode))
+    {
+        request->send(400, "application/json", "{\"success\":false,\"message\":\"Invalid weather data source\"}");
+        return;
+    }
+
+    DataSourceMode departuresSourceMode = DataSourceMode::Mqtt;
+    if (!parseUiDataSourceMode(departuresDataSourceText, departuresSourceMode))
+    {
+        request->send(400, "application/json", "{\"success\":false,\"message\":\"Invalid departures data source\"}");
+        return;
+    }
+
+    setWeatherDataSourceMode(weatherSourceMode);
+    setDeparturesDataSourceMode(departuresSourceMode);
     setWeatherApiProvider(static_cast<WeatherApiProvider>(weatherApiProviderText.toInt()));
     setDeparturesApiProvider(static_cast<DeparturesApiProvider>(departuresApiProviderText.toInt()));
     setLocationName(locationName.c_str());

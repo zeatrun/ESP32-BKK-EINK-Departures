@@ -52,7 +52,7 @@ void setup()
     configASSERT(s_clientMutex);
     configASSERT(s_wifiEventGroup);
 
-    if (StartupManager::isConfigMode())
+    if (!StartupManager::isConfigMode())
     {
         // ── WiFi manager (must be inited before MQTT so the event group is ready) ─
         wifiManagerInit(s_wifiEventGroup);
