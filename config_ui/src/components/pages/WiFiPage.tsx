@@ -21,8 +21,10 @@ export default function WiFiPage({ config, setConfig, t, onNext, onPrev }: PageP
   const [networks, setNetworks] = useState<WiFiNetwork[]>([]);
   const [scanning, setScanning] = useState(true);
   const [showManual, setShowManual] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
   const ssidInputRef = useRef<HTMLInputElement | null>(null);
   const passwordInputRef = useRef<HTMLInputElement | null>(null);
+  const scanRequestIdRef = useRef(0);
 
   const canProceed = config.wifi_ssid.length > 0 && config.wifi_password.length >= 8;
 
@@ -33,15 +35,47 @@ export default function WiFiPage({ config, setConfig, t, onNext, onPrev }: PageP
     }
   };
 
-  useEffect(() => {
-    const doScan = async () => {
-      setScanning(true);
-      const found = await scanWiFiNetworks();
+  const runScan = async (forceRefresh: boolean) => {
+    const requestId = ++scanRequestIdRef.current;
+    setScanning(true);
+
+    const maxPolls = 40;
+    for (let poll = 0; poll < maxPolls; poll += 1) {
+      const scanResponse = await scanWiFiNetworks(forceRefresh && poll === 0);
+
+      if (requestId !== scanRequestIdRef.current) {
+        return;
+      }
+
+      const found = scanResponse.networks ?? [];
       setNetworks(found);
+
+      if (scanResponse.status === 'done') {
+        setScanning(false);
+        if (found.length === 0) setShowManual(true);
+        return;
+      }
+
+      if (scanResponse.status === 'failed') {
+        setScanning(false);
+        if (found.length === 0) setShowManual(true);
+        return;
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, 350));
+    }
+
+    if (requestId === scanRequestIdRef.current) {
       setScanning(false);
-      if (found.length === 0) setShowManual(true);
+      if (networks.length === 0) setShowManual(true);
+    }
+  };
+
+  useEffect(() => {
+    runScan(true);
+    return () => {
+      scanRequestIdRef.current += 1;
     };
-    doScan();
   }, []);
 
   useEffect(() => {
@@ -55,10 +89,7 @@ export default function WiFiPage({ config, setConfig, t, onNext, onPrev }: PageP
   }, [showManual, config.wifi_ssid]);
 
   const doRescan = async () => {
-    setScanning(true);
-    const found = await scanWiFiNetworks();
-    setNetworks(found);
-    setScanning(false);
+    await runScan(true);
   };
 
   return (
@@ -149,14 +180,36 @@ export default function WiFiPage({ config, setConfig, t, onNext, onPrev }: PageP
       {(showManual || config.wifi_ssid.length > 0) && (
         <div className="form-group">
           <label>{t.password}</label>
-          <input
-            ref={passwordInputRef}
-            type="password"
-            placeholder={t.passwordHint ?? 'At least 8 characters...'}
-            value={config.wifi_password}
-            onChange={(e) => setConfig({ ...config, wifi_password: e.target.value })}
-            onKeyDown={handleEnterProceed}
-          />
+          <div style={{ position: 'relative' }}>
+            <input
+              ref={passwordInputRef}
+              type={showPassword ? 'text' : 'password'}
+              placeholder={t.passwordHint ?? 'At least 8 characters...'}
+              value={config.wifi_password}
+              onChange={(e) => setConfig({ ...config, wifi_password: e.target.value })}
+              onKeyDown={handleEnterProceed}
+              style={{ paddingRight: '44px' }}
+            />
+            <button
+              type="button"
+              onClick={() => setShowPassword((prev) => !prev)}
+              aria-label={showPassword ? 'Hide password' : 'Show password'}
+              style={{
+                position: 'absolute',
+                right: '10px',
+                top: '50%',
+                transform: 'translateY(-50%)',
+                border: 'none',
+                background: 'transparent',
+                cursor: 'pointer',
+                fontSize: '16px',
+                lineHeight: 1,
+                color: '#666'
+              }}
+            >
+              {showPassword ? '🙈' : '👁'}
+            </button>
+          </div>
           {config.wifi_password && config.wifi_password.length < 8 && (
             <small style={{ color: '#f44336', display: 'block', marginTop: '4px' }}>
               {t.passwordTooShort ?? 'Password must be at least 8 characters'}

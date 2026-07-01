@@ -5,13 +5,24 @@ export interface WiFiNetwork {
   open: boolean;
 }
 
-export async function scanWiFiNetworks(): Promise<WiFiNetwork[]> {
+export interface WiFiScanResponse {
+  status: 'scanning' | 'done' | 'failed';
+  networks: WiFiNetwork[];
+}
+
+export async function scanWiFiNetworks(forceRefresh = false): Promise<WiFiScanResponse> {
   try {
-    const response = await fetch(`${API_BASE}/wifi-scan`);
+    const response = await fetch(`${API_BASE}/wifi-scan${forceRefresh ? '?refresh=1' : ''}`);
     const data = await response.json();
-    return data.networks ?? [];
+    return {
+      status: data.status ?? 'done',
+      networks: data.networks ?? []
+    };
   } catch (error) {
-    return [];
+    return {
+      status: 'failed',
+      networks: []
+    };
   }
 }
 
@@ -20,10 +31,15 @@ const API_BASE = '/api';
 
 export async function testWiFi(ssid: string, password: string): Promise<WiFiTestResult> {
   try {
+    const body = new URLSearchParams({
+      ssid,
+      password,
+    }).toString();
+
     const response = await fetch(`${API_BASE}/wifi-test`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ssid, password })
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
+      body
     });
     
     const data = await response.json();

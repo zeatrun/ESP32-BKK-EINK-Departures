@@ -21,7 +21,6 @@ static EventGroupHandle_t s_wifiEventGroup = nullptr;
 void setup()
 {
     Serial.begin(115200);
-    delay(2000);
     Serial.println("7.3\" E-Paper Departures and Weather Display");
 
     // ── Boot mode detection ───────────────────────────────────────────────────
@@ -30,6 +29,8 @@ void setup()
 
     if (StartupManager::isConfigMode())
     {
+        Serial.println("[MAIN] Starting config mode...");
+
         if (!g_config.beginConfigMode())
         {
             Serial.println("[MAIN] Config mode failed to start.");
@@ -51,17 +52,20 @@ void setup()
     configASSERT(s_clientMutex);
     configASSERT(s_wifiEventGroup);
 
-    // ── WiFi manager (must be inited before MQTT so the event group is ready) ─
-    wifiManagerInit(s_wifiEventGroup);
-    wifiTaskStart();
+    if (StartupManager::isConfigMode())
+    {
+        // ── WiFi manager (must be inited before MQTT so the event group is ready) ─
+        wifiManagerInit(s_wifiEventGroup);
+        wifiTaskStart();
 
-    // ── Data source manager (MQTT or direct API) ────────────────────────────
-    dataSourceManagerInit(s_wifiEventGroup, espClient, s_clientMutex);
-    dataSourceManagerStart();
+        // ── Data source manager (MQTT or direct API) ────────────────────────────
+        dataSourceManagerInit(s_wifiEventGroup, espClient, s_clientMutex);
+        dataSourceManagerStart();
 
-    // ── Time manager ──────────────────────────────────────────────────────────
-    timeManagerInit(s_wifiEventGroup);
-    timeManagerStart();
+        // ── Time manager ──────────────────────────────────────────────────────────
+        timeManagerInit(s_wifiEventGroup);
+        timeManagerStart();
+    }
 
     // ── Battery monitor (starts monitoring after init) ───────────────────────
     batteryMonitorInit();

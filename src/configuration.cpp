@@ -26,6 +26,7 @@ namespace
 {
 constexpr uint16_t CAPTIVE_DNS_PORT = 53;
 constexpr char CONFIG_PREF_NS[] = "cfg";
+constexpr char CONFIG_PAGE_FS_PATH[] = "/config_page.html";
 constexpr bool DUMMY_DEFAULT_USE_MQTT = true;
 
 Configuration::DataSourceMode dataSourceModeFromStoredBool(bool useMqtt)
@@ -322,6 +323,103 @@ bool ensureLittleFsMounted()
     }
 
     return mounted;
+}
+
+String loadConfigPageTemplateFromFs()
+{
+    if (!ensureLittleFsMounted())
+    {
+        return String();
+    }
+
+    File file = LittleFS.open(CONFIG_PAGE_FS_PATH, "r");
+    if (!file)
+    {
+        Serial.printf("[CONFIG] Missing HTML template in LittleFS: %s\n", CONFIG_PAGE_FS_PATH);
+        return String();
+    }
+
+    String html = file.readString();
+    file.close();
+    return html;
+}
+
+String buildConfigPage(const Configuration& cfg)
+{
+    String timezoneOptions;
+    timezoneOptions.reserve(1200);
+    for (const auto& option : TIMEZONE_OPTIONS)
+    {
+        timezoneOptions += F("<option value='");
+        timezoneOptions += htmlEscape(option.value);
+        timezoneOptions += F("'");
+        if (strcmp(option.value, cfg.timezone()) == 0)
+        {
+            timezoneOptions += F(" selected");
+        }
+        timezoneOptions += F(">\n");
+        timezoneOptions += htmlEscape(option.labelEn);
+        timezoneOptions += F("</option>");
+    }
+
+    String html = loadConfigPageTemplateFromFs();
+    if (html.isEmpty())
+    {
+        return F("<!doctype html><html><body style='font-family:Verdana,sans-serif;margin:16px'><h2>Configuration page missing</h2><p>Upload filesystem image and ensure /config_page.html is present.</p></body></html>");
+    }
+
+    html.replace("{{AP_SSID}}", htmlEscape(cfg.configApSsid()));
+    html.replace("{{AP_PASSWORD}}", htmlEscape(cfg.configApPassword()));
+    html.replace("{{WIFI_SSID}}", htmlEscape(cfg.wifiSsid()));
+    html.replace("{{WIFI_PASSWORD}}", htmlEscape(cfg.wifiPassword()));
+    html.replace("{{MQTT_SERVER}}", htmlEscape(cfg.mqttServer()));
+    html.replace("{{MQTT_PORT}}", String(static_cast<unsigned int>(cfg.mqttPort())));
+    html.replace("{{MQTT_DEPARTURES_TOPIC}}", htmlEscape(cfg.mqttTopicDepartures()));
+    html.replace("{{MQTT_WEATHER_TOPIC}}", htmlEscape(cfg.mqttTopicWeather()));
+    html.replace("{{TIMEZONE_OPTIONS}}", timezoneOptions);
+    
+    html.replace("{{WEATHER_DATA_SOURCE_MQTT}}", cfg.weatherDataSourceMode() == Configuration::DataSourceMode::Mqtt ? "selected" : "");
+    html.replace("{{WEATHER_DATA_SOURCE_API}}", cfg.weatherDataSourceMode() == Configuration::DataSourceMode::DirectApi ? "selected" : "");
+    html.replace("{{WEATHER_API_OPENMETEO}}", cfg.weatherApiProvider() == Configuration::WeatherApiProvider::OpenMeteo ? "selected" : "");
+    html.replace("{{WEATHER_API_OWM}}", cfg.weatherApiProvider() == Configuration::WeatherApiProvider::OpenWeatherMap ? "selected" : "");
+    html.replace("{{DEPARTURES_DATA_SOURCE_MQTT}}", cfg.departuresDataSourceMode() == Configuration::DataSourceMode::Mqtt ? "selected" : "");
+    html.replace("{{DEPARTURES_DATA_SOURCE_API}}", cfg.departuresDataSourceMode() == Configuration::DataSourceMode::DirectApi ? "selected" : "");
+    html.replace("{{DEPARTURES_API_BKK}}", cfg.departuresApiProvider() == Configuration::DeparturesApiProvider::Bkk ? "selected" : "");
+    html.replace("{{DEPARTURES_API_MOCK}}", cfg.departuresApiProvider() == Configuration::DeparturesApiProvider::MockData ? "selected" : "");
+    
+    html.replace("{{LOCATION_NAME}}", htmlEscape(cfg.locationName()));
+    {
+        char latBuf[16], lonBuf[16];
+        snprintf(latBuf, sizeof(latBuf), "%.6f", cfg.locationLat());
+        snprintf(lonBuf, sizeof(lonBuf), "%.6f", cfg.locationLon());
+        html.replace("{{LOCATION_LAT}}", latBuf);
+        html.replace("{{LOCATION_LON}}", lonBuf);
+    }
+    html.replace("{{BKK_API_KEY}}", htmlEscape(cfg.bkkApiKey()));
+    html.replace("{{BUS_STOP_ID}}", htmlEscape(cfg.busStopId()));
+    html.replace("{{TRAIN_STOP_ID}}", htmlEscape(cfg.trainStopId()));
+
+    // Backward compatibility: if an older filesystem template is still served,
+    // inject a visible OTA link block before </body>.
+    if (html.indexOf("href='/update'") < 0)
+    {
+        const char* otaBlock =
+            "<div style='margin-top:14px'>"
+            "<a href='/update' style='display:inline-block;padding:10px 14px;border-radius:8px;background:#2563eb;color:#fff;font-weight:700;text-decoration:none'>Update firmware</a>"
+            "</div>";
+
+        const int bodyClosePos = html.lastIndexOf("</body>");
+        if (bodyClosePos >= 0)
+        {
+            html = html.substring(0, bodyClosePos) + otaBlock + html.substring(bodyClosePos);
+        }
+        else
+        {
+            html += otaBlock;
+        }
+    }
+    
+    return html;
 }
 
 void sendValidationError(AsyncWebServerRequest* request, const char* message)
@@ -918,6 +1016,9 @@ void Configuration::setupWebServerRoutes()
         handleRootGet(request);
     });
 
+    // Serve React bundled assets directly when present.
+    m_webServer->serveStatic("/assets", LittleFS, "/config-app/assets");
+
     // Common captive portal probes across major clients.
     m_webServer->on("/generate_204", HTTP_GET, [this](AsyncWebServerRequest* request) {
         handleCaptiveProbeGet(request);
@@ -983,17 +1084,19 @@ void Configuration::handleRootGet(AsyncWebServerRequest* request)
 
     logWebRequest(request, "handleRootGet");
 
-    if (!LittleFS.exists("/config-app/index.html"))
+    // Try to serve React app first
+    if (LittleFS.exists("/config-app/index.html"))
     {
-        request->send(503, "text/html",
-            F("<!doctype html><html><body style='font-family:Verdana,sans-serif;margin:16px'>"
-              "<h2>Config UI not found</h2>"
-              "<p>Upload the filesystem image (<code>buildfs</code> + <code>uploadfs</code>) and try again.</p>"
-              "</body></html>"));
+        AsyncWebServerResponse* response = request->beginResponse(LittleFS, "/config-app/index.html", "text/html");
+        response->addHeader("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
+        response->addHeader("Pragma", "no-cache");
+        response->addHeader("Expires", "0");
+        request->send(response);
         return;
     }
 
-    AsyncWebServerResponse* response = request->beginResponse(LittleFS, "/config-app/index.html", "text/html");
+    // Fallback to old HTML config page
+    AsyncWebServerResponse* response = request->beginResponse(200, "text/html", buildConfigPage(*this));
     response->addHeader("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
     response->addHeader("Pragma", "no-cache");
     response->addHeader("Expires", "0");
@@ -1327,29 +1430,62 @@ void Configuration::handleApiWifiScanGet(AsyncWebServerRequest* request)
 
     logWebRequest(request, "handleApiWifiScanGet");
 
-    int n = WiFi.scanNetworks(false, false);
+    const bool forceRefresh = hasRequestArg(request, "refresh") && requestArg(request, "refresh") == "1";
 
-    String json = "{\"networks\":[";
-    bool first = true;
-    for (int i = 0; i < n; i++)
+    auto sendScanResponse = [request](const char* status, int networkCount)
     {
-        if (!first) json += ',';
-        first = false;
-        json += "{\"ssid\":\"";
-        json += WiFi.SSID(i);
-        json += "\",\"rssi\":";
-        json += WiFi.RSSI(i);
-        json += ",\"open\":";
-        json += (WiFi.encryptionType(i) == WIFI_AUTH_OPEN) ? "true" : "false";
-        json += "}";
+        String json = String("{\"status\":\"") + status + "\",\"networks\":[";
+        bool first = true;
+        for (int i = 0; i < networkCount; ++i)
+        {
+            if (!first)
+            {
+                json += ',';
+            }
+            first = false;
+            json += "{\"ssid\":\"";
+            json += WiFi.SSID(i);
+            json += "\",\"rssi\":";
+            json += WiFi.RSSI(i);
+            json += ",\"open\":";
+            json += (WiFi.encryptionType(i) == WIFI_AUTH_OPEN) ? "true" : "false";
+            json += "}";
+        }
+        json += "]}";
+
+        AsyncWebServerResponse* response = request->beginResponse(200, "application/json", json);
+        response->addHeader("Access-Control-Allow-Origin", "*");
+        request->send(response);
+    };
+
+    if (forceRefresh)
+    {
+        WiFi.scanDelete();
+        WiFi.scanNetworks(true, false); // async scan start
+        sendScanResponse("scanning", 0);
+        return;
     }
-    json += "]}";
 
+    const int scanState = WiFi.scanComplete();
+
+    if (scanState == -1)
+    {
+        sendScanResponse("scanning", 0);
+        return;
+    }
+
+    if (scanState >= 0)
+    {
+        sendScanResponse("done", scanState);
+        WiFi.scanDelete();
+        return;
+    }
+
+    // Failed or not started yet: kick off a new async scan and ask client to poll.
     WiFi.scanDelete();
-
-    AsyncWebServerResponse* response = request->beginResponse(200, "application/json", json);
-    response->addHeader("Access-Control-Allow-Origin", "*");
-    request->send(response);
+    WiFi.scanNetworks(true, false);
+    sendScanResponse("scanning", 0);
+    return;
 }
 
 
@@ -1362,18 +1498,27 @@ void Configuration::handleApiWifiTestPost(AsyncWebServerRequest* request)
 
     logWebRequest(request, "handleApiWifiTestPost");
 
-    // Parse JSON body
-    String ssid = "";
-    String password = "";
-    
-    if (request->hasArg("plain"))
+    // Prefer form/query params; fallback to JSON body for compatibility.
+    String ssid = trimCopy(requestArg(request, "ssid"));
+    String password = requestArg(request, "password");
+
+    if (ssid.isEmpty() || password.isEmpty())
     {
-        String body = request->arg("plain");
-        JsonDocument doc;
-        if (deserializeJson(doc, body) == DeserializationError::Ok)
+        if (request->hasArg("plain"))
         {
-            ssid = doc["ssid"].as<String>();
-            password = doc["password"].as<String>();
+            String body = request->arg("plain");
+            JsonDocument doc;
+            if (deserializeJson(doc, body) == DeserializationError::Ok)
+            {
+                if (ssid.isEmpty())
+                {
+                    ssid = trimCopy(doc["ssid"].as<String>());
+                }
+                if (password.isEmpty())
+                {
+                    password = doc["password"].as<String>();
+                }
+            }
         }
     }
 
